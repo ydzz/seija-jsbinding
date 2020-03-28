@@ -1,0 +1,9 @@
+[package]
+name = "js-app"
+version = "0.1.0"
+authors = ["yangdao <458424869@qq.com>"]
+edition = "2018"
+
+[dependencies]
+seija-jsbinding = {path = "../../seija-jsbinding"}
+qjs-rs = {git = "https://gitee.com/yangdao/qjs-rs.git",version = "0.1.0"}
