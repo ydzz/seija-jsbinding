@@ -5,6 +5,6 @@ authors = ["yangdao <458424869@qq.com>"]
 edition = "2018"
 
 [dependencies]
-qjs-rs = {git = "https://gitee.com/yangdao/qjs-rs.git",version = "0.1.0"}
+qjs-rs = {path = "../qjs-rs"}
 seija = {path = "../seija"}
 c_str_macro = "1.0.2"

@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 seija-jsbinding = {path = "../../seija-jsbinding"}
-qjs-rs = {git = "https://gitee.com/yangdao/qjs-rs.git",version = "0.1.0"}
+qjs-rs = {path = "../../qjs-rs"}

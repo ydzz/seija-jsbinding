@@ -37,7 +37,11 @@ pub enum BootStartError {
 }
 
 pub fn boot_start(ctx:&mut JSContext,main_js_name:&str) -> Result<AutoDropJSValue,BootStartError> {
-    let file_string = std::fs::read_to_string(main_js_name).map_err(|_| BootStartError::LoadFileError)?;
+    let mut file_string:String = std::fs::read_to_string(main_js_name).map_err(|_| BootStartError::LoadFileError)?;
+    file_string.insert_str(0, "function require(path) { 
+        return __require(path,function(){});
+    } ");
+    //file_string.insert_str(0, "import * as seija from 'seija';\r\n");
     let ret_val = ctx.eval(file_string.as_str(), main_js_name,(q::JS_EVAL_TYPE_GLOBAL | q::JS_EVAL_TYPE_MODULE) as i32);
     Ok(ret_val)
 }
@@ -52,6 +56,6 @@ mod tests {
         let mut ctx = JSContext::new(&runtime).unwrap();
         init_internal(&mut ctx,&mut runtime);
         binding_all(&mut ctx);
-        boot_start(&mut ctx,"./js/main.js").unwrap();
+        boot_start(&mut ctx,"./js-app/index.js").unwrap();
     }
 }
