@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 seija-jsbinding = {path = "../../seija-jsbinding"}
 qjs-rs = {path = "../../qjs-rs"}
+
+[profile.release]
+lto = true

@@ -61,7 +61,8 @@ impl IGame for JSGame {
         world.fetch::<Arc<AssetEnv>>().set_fs_root(self.res_path.as_str());
         if let Some(ref fn_val) = self.on_start {
             unsafe {
-                q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+               let ret_val = q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+               AutoDropJSValue::drop_js_value(ret_val,self.ctx);
             }
         }
     }
@@ -69,7 +70,8 @@ impl IGame for JSGame {
     fn update(&mut self,_world:&mut World) {
         if let Some(ref fn_val) = self.on_update {
             unsafe {
-                q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+                let ret_val = q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+                AutoDropJSValue::drop_js_value(ret_val,self.ctx);
             }
         }
     }
@@ -77,7 +79,8 @@ impl IGame for JSGame {
     fn quit(&mut self,_world:&mut World) {
         if let Some(ref fn_val) = self.on_quit {
             unsafe {
-                q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+                let ret_val = q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
+                AutoDropJSValue::drop_js_value(ret_val,self.ctx);
             }
         }
         AutoDropJSValue::drop_js_value(self.world_object.value(), self.ctx);

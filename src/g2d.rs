@@ -31,7 +31,7 @@ static mut LOADER_REF_COUNT: u32 = 0;
 
 
 pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
-    SIMPLE2D_CLASS = Some(JSClass::new("Simple2d", ctx.c_rt()));
+    SIMPLE2D_CLASS = Some(JSClass::new_full("Simple2d", ctx.c_rt(),Some(simple2d_finalizer),None,None));
     LOADER_CLASS = Some(JSClass::new_full("Loader",ctx.c_rt(),Some(loader_finalizer),None,None));
     EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(event_gc),None));
     BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),None,None));
@@ -66,10 +66,16 @@ pub fn g2d_export(ctx: *mut q::JSContext, m: *mut q::JSModuleDef) {
 
 unsafe extern "C" fn loader_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue) {
     let loader_class: &JSClass = LOADER_CLASS.as_ref().unwrap();
-    let ptr: *mut FetchMut<'_, S2DLoader> =
-        std::mem::transmute(q::JS_GetOpaque(val, loader_class.class_id()));
+    let ptr: *mut FetchMut<'_, S2DLoader> = std::mem::transmute(q::JS_GetOpaque(val, loader_class.class_id()));
     let _box_loader: Box<FetchMut<'_, S2DLoader>> = Box::from_raw(ptr);
     LOADER_REF_COUNT -= 1;
+}
+
+unsafe extern "C" fn simple2d_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue) {
+    /*
+    let simple_class: &JSClass = SIMPLE2D_CLASS.as_ref().unwrap();
+    let ptr: *mut Simple2d = std::mem::transmute(q::JS_GetOpaque(val, simple_class.class_id()));
+    Box::from_raw(ptr);*/
 }
 
 unsafe extern "C" fn event_finalizer(_rt: *mut q::JSRuntime, _val: q::JSValue) {
@@ -94,9 +100,8 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
     let mut may_width = None;
     let mut may_height = None;
     let attr_dic = RawJsValue::deserialize_value(args[0], ctx).unwrap();
-    let js_win_attr = attr_dic
-        .as_object()
-        .and_then(|m| m.get(&String::from("window")));
+    
+    let js_win_attr = attr_dic.as_object().and_then(|m| m.get(&String::from("window")));
     if let Some(js_val) = js_win_attr {
         let win_map_val = RawJsValue::deserialize_value(js_val.inner().0, ctx).unwrap();
         let may_map = win_map_val.as_object();
@@ -144,7 +149,7 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
             width: width,
             height: height,
         });
-    });
+    });/**/
     class_obj.set_opaque(Box::into_raw(s2d));
     class_obj.value()
 }
