@@ -3,14 +3,14 @@ use qjs_rs::{
     q, JSClass, JSClassOject, JSContext, JSPropertyItem, JSValue, RawJsValue,
 };
 use seija::assets::{errors::AssetLoadError, Handle,AssetStorage};
-use seija::common::{Rect2D, Transform};
+use seija::common::{Rect2D, Transform,transform::{Parent}};
 use seija::g2d::Image;
 use seija::frp::{FRPNode,Event,Behavior};
 use seija::json::Value;
 use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
-    components::{ImageRender, SpriteSheet},
+    components::{ImageRender, SpriteSheet,ImageType},
     types, FontAsset,
 };
 use seija::window::{ViewPortSize};
@@ -45,19 +45,27 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1),
         JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1),
         JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
-        JSPropertyItem::func(c_str!("addCABEventRoot"),Some(c_add_cab_event_root) ,1),
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
         JSPropertyItem::func(c_str!("destoryEntity"),Some(c_destory_entity) ,1),
         JSPropertyItem::func(c_str!("newBehavior"),Some(c_new_behavior) ,1),
         JSPropertyItem::func(c_str!("attachBehavior"),Some(c_attach_behavior) ,1),
         JSPropertyItem::func(c_str!("behaviorSetFoldFunc"),Some(behavior_set_fold_func), 1),
+        JSPropertyItem::func(c_str!("setTransformPositonB"),Some(set_transform_positon_b), 1),
+        JSPropertyItem::func(c_str!("getViewPortSize"),Some(c_get_view_port_size), 1),
 
-        JSPropertyItem::func(c_str!("setTransformPositonB"),Some(set_transform_positon_b), 1)
+        JSPropertyItem::func(c_str!("getTextureSize"),Some(c_get_texture_size), 1),
+        JSPropertyItem::func(c_str!("setParent"),Some(c_set_parent), 1),
+        //component
+        JSPropertyItem::func(c_str!("addCABEventRoot"),Some(c_add_cab_event_root) ,1),
+        JSPropertyItem::func(c_str!("addRect2d"), Some(c_add_rect_2d), 1),
+        JSPropertyItem::func(c_str!("addTransform"),Some(c_add_transform), 1),
+        JSPropertyItem::func(c_str!("addImageRender"),Some(c_add_image_render), 1)
     ];
     ctx.set_property_function_list(app_obj, &app_attrs);
     q::JS_SetModuleExport(ctx.c_ctx(), m, c_str!("g2d").as_ptr(), app_obj);
 }
 
+/* #region Main */
 pub fn g2d_export(ctx: *mut q::JSContext, m: *mut q::JSModuleDef) {
     unsafe {
         q::JS_AddModuleExport(ctx, m, c_str!("g2d").as_ptr());
@@ -71,7 +79,7 @@ unsafe extern "C" fn loader_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue) {
     LOADER_REF_COUNT -= 1;
 }
 
-unsafe extern "C" fn simple2d_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue) {
+unsafe extern "C" fn simple2d_finalizer(_rt: *mut q::JSRuntime, _val: q::JSValue) {
     /*
     let simple_class: &JSClass = SIMPLE2D_CLASS.as_ref().unwrap();
     let ptr: *mut Simple2d = std::mem::transmute(q::JS_GetOpaque(val, simple_class.class_id()));
@@ -86,7 +94,7 @@ unsafe extern "C" fn behavior_finalizer(_rt: *mut q::JSRuntime, _val: q::JSValue
     dbg!("behavior finalizer");
 }
 
-unsafe extern "C" fn event_gc(rt: *mut q::JSRuntime, val: q::JSValue,mark_func: q::JS_MarkFunc) {
+unsafe extern "C" fn event_gc(_rt: *mut q::JSRuntime, _val: q::JSValue,_mark_func: q::JS_MarkFunc) {
     //let raw_js = RawJsValue(val);
     //raw_js.add_ref_count(-1);
 }
@@ -117,26 +125,10 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
             let color_arr = RawJsValue::deserialize_value(js_bg_color.inner().0, ctx).unwrap();
             let mut color: [f32; 4] = [1f32, 1f32, 1f32, 1f32];
             if let Some(arr) = color_arr.as_array() {
-                color[0] = arr
-                    .get_unchecked(0)
-                    .as_number()
-                    .map(|n: f64| n as f32)
-                    .unwrap_or(1.0f32);
-                color[1] = arr
-                    .get_unchecked(1)
-                    .as_number()
-                    .map(|n: f64| n as f32)
-                    .unwrap_or(1.0f32);
-                color[2] = arr
-                    .get_unchecked(2)
-                    .as_number()
-                    .map(|n: f64| n as f32)
-                    .unwrap_or(1.0f32);
-                color[3] = arr
-                    .get_unchecked(3)
-                    .as_number()
-                    .map(|n: f64| n as f32)
-                    .unwrap_or(1.0f32);
+                color[0] = arr.get_unchecked(0).as_number().map(|n: f64| n as f32).unwrap_or(1.0f32);
+                color[1] = arr.get_unchecked(1).as_number().map(|n: f64| n as f32).unwrap_or(1.0f32);
+                color[2] = arr.get_unchecked(2).as_number().map(|n: f64| n as f32).unwrap_or(1.0f32);
+                color[3] = arr.get_unchecked(3).as_number().map(|n: f64| n as f32).unwrap_or(1.0f32);
             }
             s2d.with_bg_color(color);
         }
@@ -149,12 +141,12 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
             width: width,
             height: height,
         });
-    });/**/
+    });
     class_obj.set_opaque(Box::into_raw(s2d));
     class_obj.value()
 }
 
-pub unsafe extern "C" fn c_fetch_loader(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_fetch_loader(ctx: *mut q::JSContext,_: q::JSValue,_count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let class_id = WORLD_CLASS.as_ref().unwrap().class_id();
     let world: &mut World = std::mem::transmute(q::JS_GetOpaque(*argv, class_id));
     if LOADER_REF_COUNT > 0 {
@@ -170,43 +162,20 @@ pub unsafe extern "C" fn c_fetch_loader(ctx: *mut q::JSContext,_: q::JSValue,cou
     loader_object.value()
 }
 
-pub unsafe extern "C" fn c_load_sync(
-    ctx: *mut q::JSContext,
-    _: q::JSValue,
-    count: c_int,
-    argv: *mut q::JSValue,
-) -> q::JSValue {
+pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let loader_class: &JSClass = LOADER_CLASS.as_ref().unwrap();
-    let loader: &mut FetchMut<'_, S2DLoader> =
-        std::mem::transmute(q::JS_GetOpaque(args[0], loader_class.class_id()));
+    let loader: &mut FetchMut<'_, S2DLoader> = std::mem::transmute(q::JS_GetOpaque(args[0], loader_class.class_id()));
 
-    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(
-        args[1],
-        WORLD_CLASS.as_ref().unwrap().class_id(),
-    ));
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[1],WORLD_CLASS.as_ref().unwrap().class_id()));
 
-    let asset_type = RawJsValue::deserialize_value(args[2], ctx)
-        .unwrap()
-        .as_int()
-        .unwrap();
-    let asset_path = RawJsValue::deserialize_value(args[3], ctx)
-        .unwrap()
-        .into_string()
-        .unwrap();
+    let asset_type = RawJsValue::deserialize_value(args[2], ctx).unwrap().as_int().unwrap();
+    let asset_path = RawJsValue::deserialize_value(args[3], ctx).unwrap().into_string().unwrap();
     let may_asset_id = match asset_type {
-        0 => loader
-            .load_sync::<Value, DefaultBackend>(&asset_path, world)
-            .map(|h| h.id()),
-        1 => loader
-            .load_sync::<types::Texture, DefaultBackend>(&asset_path, world)
-            .map(|h| h.id()),
-        2 => loader
-            .load_sync::<SpriteSheet, DefaultBackend>(&asset_path, world)
-            .map(|h| h.id()),
-        3 => loader
-            .load_sync::<FontAsset, DefaultBackend>(&asset_path, world)
-            .map(|h| h.id()),
+        0 => loader.load_sync::<Value, DefaultBackend>(&asset_path, world).map(|h| h.id()),
+        1 => loader.load_sync::<types::Texture, DefaultBackend>(&asset_path, world).map(|h| h.id()),
+        2 => loader.load_sync::<SpriteSheet, DefaultBackend>(&asset_path, world).map(|h| h.id()),
+        3 => loader.load_sync::<FontAsset, DefaultBackend>(&asset_path, world).map(|h| h.id()),
         _ => Err(AssetLoadError::NotFoundLoader),
     };
     if may_asset_id.is_ok() {
@@ -219,16 +188,15 @@ pub unsafe extern "C" fn c_load_sync(
     }
 }
 
+/*#region newImage*/
+//TODO delete it
 pub unsafe extern "C" fn c_new_image(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let world: &mut World = std::mem::transmute(q::JS_GetOpaque(
         args[0],
         WORLD_CLASS.as_ref().unwrap().class_id(),
     ));
-    let tex_id = RawJsValue::deserialize_value(args[1], ctx)
-        .unwrap()
-        .as_int()
-        .unwrap();
+    let tex_id = RawJsValue::deserialize_value(args[1], ctx).unwrap().as_int().unwrap();
     let mut image_render = ImageRender::new(Handle::new(tex_id as u32));
     let mut t = Transform::default();
     let mut rect: Rect2D = Rect2D {
@@ -253,9 +221,8 @@ pub unsafe extern "C" fn c_new_image(ctx: *mut q::JSContext,_: q::JSValue,count:
         let object_map = &js_object.as_ref();
 
         
-        let may_rect_js_value = object_map
-            .and_then(|o| o.get(&String::from("rect")))
-            .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok());
+        let may_rect_js_value = object_map.and_then(|o| o.get(&String::from("rect")))
+                                          .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok());
         if let Some(rect_js_value) = may_rect_js_value.as_ref() {
             if let Some(width) = rect_js_value.object_get_number("width", ctx) {
                 rect.width = width as f32;
@@ -322,7 +289,7 @@ pub unsafe extern "C" fn c_new_image(ctx: *mut q::JSContext,_: q::JSValue,count:
     let image = Image::create(world, rect, t, image_render,transparent,may_e);
     RawJsValue::val_i32(image.id() as i32)
 }
-
+/*#endregion newImage*/
 
 pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
@@ -378,32 +345,14 @@ pub unsafe extern "C" fn c_new_entity(_ctx: *mut q::JSContext,_: q::JSValue,coun
         let view_size = world.fetch::<ViewPortSize>();
         (view_size.width() as f32,view_size.height() as f32)
     };
-    let e = world.create_entity().with(Transform::default()).with(Rect2D {
-        width:w,
-        height:h,
-        anchor:[0.5f32,0.5f32]
-    }).build();
+    let e = world.create_entity().build();
     RawJsValue::val_i32(e.id() as i32)
 }
 
-pub unsafe extern "C" fn c_add_cab_event_root(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
-    let args = std::slice::from_raw_parts(argv, count as usize);
-    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
-    let may_entity = get_entity(world, args[1], ctx);
-    if let Some(entity) = may_entity {
-        let mut storage = world.write_storage::<CABEventRoot>();
-        storage.insert(entity,CABEventRoot {}).unwrap();
-    }
-    RawJsValue::val_null()
-}
-
-
-
-pub unsafe extern "C" fn c_ref_count(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_ref_count(ctx: *mut q::JSContext,_: q::JSValue,_count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let raw_js = RawJsValue(*argv);
     RawJsValue::val_i32(raw_js.ref_count())
 }
-
 
 pub unsafe extern "C" fn c_chain_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
@@ -475,12 +424,168 @@ pub unsafe extern "C" fn set_transform_positon_b(ctx: *mut q::JSContext,_: q::JS
     RawJsValue::val_null()
 }
 
-
-
-
 fn get_entity(world:&mut World,js_val:q::JSValue,ctx:*mut q::JSContext) -> Option<Entity> {
     RawJsValue::deserialize_value(js_val,ctx).ok()
                              .and_then(|n| n.as_int())
                              .map(|eid| world.entities().entity(eid as u32))
 }
 
+pub unsafe extern "C" fn c_get_view_port_size(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    if count == 0 {
+        return RawJsValue::val_null()
+    }
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(*argv,WORLD_CLASS.as_ref().unwrap().class_id()));
+    let (w,h) = {
+        let view_size = world.fetch::<ViewPortSize>();
+        (view_size.width() as f32,view_size.height() as f32)
+    };
+    JSValue::Array(vec![JSValue::Float(w as f64),JSValue::Float(h as f64)]).to_c_value(ctx)
+}
+
+pub unsafe extern "C" fn c_get_texture_size(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let tex_id = RawJsValue::deserialize_value(args[1], ctx).unwrap().as_int().unwrap();
+    let storage = world.fetch::<AssetStorage<types::Texture>>();
+    if let Some(tex_ref) = storage.get_by_id(tex_id as u32) {
+        let (w,h) = tex_ref.texture_size();
+        return JSValue::Array(vec![JSValue::Int(w as i32),JSValue::Int(h as i32)]).to_c_value(ctx);
+    }
+    RawJsValue::val_null()
+}
+
+
+
+//component
+pub unsafe extern "C" fn c_add_cab_event_root(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let may_entity = get_entity(world, args[1], ctx);
+    if let Some(entity) = may_entity {
+        let mut storage = world.write_storage::<CABEventRoot>();
+        if storage.contains(entity) {
+            return RawJsValue::val_bool(false)
+        };
+        storage.insert(entity,CABEventRoot {}).unwrap();
+    }
+    RawJsValue::val_null()
+}
+/* #endregion */
+
+pub unsafe extern "C" fn c_add_rect_2d(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let may_entity = get_entity(world, args[1], ctx);
+    if let Some(entity) = may_entity {
+        let mut storage = world.write_storage::<Rect2D>();
+        if storage.contains(entity) {
+            return RawJsValue::val_bool(false)
+        };
+        let width = RawJsValue(args[2]).to_value(ctx).ok().and_then(|v| v.as_number()).unwrap_or(0f64);
+        let height = RawJsValue(args[3]).to_value(ctx).ok().and_then(|v| v.as_number()).unwrap_or(0f64);
+        let a_x = RawJsValue(args[4]).to_value(ctx).ok().and_then(|v| v.as_number()).unwrap_or(0f64);
+        let a_y = RawJsValue(args[5]).to_value(ctx).ok().and_then(|v| v.as_number()).unwrap_or(0f64);
+        let new_rect = Rect2D {
+            width:width as f32,
+            height:height as f32,
+            anchor:[a_x as f32,a_y as f32]
+        };
+        storage.insert(entity,new_rect).unwrap();
+        return RawJsValue::val_bool(true);
+    }
+    RawJsValue::val_bool(false)
+}
+
+
+pub unsafe extern "C" fn c_add_transform(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    if count <= 2 {
+        let mut storage = world.write_storage::<Transform>();
+        if storage.contains(entity) {
+            return RawJsValue::val_bool(false)
+        }
+        storage.insert(entity,Transform::default()).unwrap();
+        return RawJsValue::val_bool(true)
+    }
+    let mut pos:Vector3<f32> = Vector3::new(0f32,0f32,0f32);
+    let mut scale:Vector3<f32> = Vector3::new(1f32,1f32,1f32);
+    let mut r:Vector3<f32> = Vector3::new(0f32,0f32,0f32);
+    if count > 2 {
+        set_vector3_array(&mut pos,args[2],ctx);
+    }
+    if count > 3 {
+        set_vector3_array(&mut scale,args[3],ctx);
+    }
+    if count > 4 {
+        set_vector3_array(&mut r,args[4],ctx);
+    }
+    let mut new_trans = Transform::default();
+    new_trans.set_position(pos);
+    new_trans.set_scale(scale);
+    new_trans.set_rotation_euler(r.x,r.y,r.z);
+    let mut storage = world.write_storage::<Transform>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,new_trans).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+pub unsafe extern "C" fn c_add_image_render(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let tex_id = RawJsValue::deserialize_value(args[2],ctx).unwrap().as_int().unwrap();
+    let mut image_render = ImageRender::new(Handle::new(tex_id as u32));
+    if count > 3 {
+        let may_num_arr = RawJsValue::deserialize_value(args[3],ctx).ok().and_then(|f| f.array_get_number());
+        if let Some(num_arr) = may_num_arr {
+            image_render.set_color(*num_arr.get_unchecked(0) as f32,*num_arr.get_unchecked(1) as f32,
+                                   *num_arr.get_unchecked(2) as f32,*num_arr.get_unchecked(3) as f32);
+        }
+    }
+
+    if count > 4 {
+        //TODO
+        //let num_typ = RawJsValue::deserialize_value(args[4],ctx).ok().and_then(|f| f.as_int()).unwrap();
+        //image_render.set_type();
+    }
+    
+    let mut storage = world.write_storage::<ImageRender>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,image_render).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+pub unsafe extern "C" fn c_set_parent(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity  = get_entity(world, args[1], ctx).unwrap();
+    let pentity = get_entity(world, args[2], ctx).unwrap();
+    let mut storage = world.write_storage::<Parent>();
+    if !storage.contains(entity) {
+       let p = Parent {entity:pentity };
+       storage.insert(entity,p).unwrap();
+       return RawJsValue::val_null();
+    }
+    let cur_p = storage.get_mut(entity).unwrap();
+    cur_p.entity = pentity;
+    RawJsValue::val_null()
+}
+
+
+/*#region tools*/
+unsafe fn set_vector3_array(arr:&mut Vector3<f32>,js_val:q::JSValue,ctx:*mut q::JSContext) {
+    let may_num_arr = RawJsValue::deserialize_value(js_val,ctx).ok().and_then(|f| f.array_get_number());
+    if let Some(num_arr) = may_num_arr {
+        arr.x = *num_arr.get_unchecked(0) as f32;
+        arr.y = *num_arr.get_unchecked(1) as f32;
+        arr.z = *num_arr.get_unchecked(2) as f32;
+    }   
+}
+
+/*#endregion newImage*/
