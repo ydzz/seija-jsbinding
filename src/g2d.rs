@@ -1,26 +1,26 @@
 use crate::core::WORLD_CLASS;
 use qjs_rs::{
-    q, JSClass, JSClassOject, JSContext, JSPropertyItem, JSValue, RawJsValue,
+    q, JSClass, JSClassOject, JSContext, JSPropertyItem, JSValue, RawJsValue,AutoDropJSValue,
 };
 use seija::assets::{errors::AssetLoadError, Handle,AssetStorage};
 use seija::common::{Rect2D, Transform,transform::{Parent}};
-use seija::g2d::Image;
-use seija::frp::{FRPNode,Event,Behavior};
+use seija::frp::{Event,Behavior};
 use seija::json::Value;
 use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
-    components::{ImageRender, SpriteSheet,ImageType},
+    Transparent,
+    components::{ImageRender,SpriteRender,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
     types, FontAsset,
 };
 use seija::window::{ViewPortSize};
 use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType};
 use seija::specs::{shred::FetchMut,Entity,World,WorldExt,world::{Builder}};
 use seija::win::{dpi::LogicalSize, WindowBuilder};
-//use seija::event::{EventNode};
+use std::collections::HashMap;
 use std::os::raw::c_int;
 use std::sync::{Arc};
-use crate::core::{JSFRPNode,QJSValue,QJSContext};
+use crate::core::{JSFRPNode,QJSValue,QJSContext,QJSWorld};
 
 pub static mut SIMPLE2D_CLASS: Option<JSClass> = None;
 pub static mut LOADER_CLASS: Option<JSClass> = None;
@@ -36,33 +36,40 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
     EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(event_gc),None));
     BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),None,None));
 
-    let app_obj = q::JS_NewObject(ctx.c_ctx());
-    let app_attrs = vec![
+    let g2d_obj = q::JS_NewObject(ctx.c_ctx());
+    let g2d_attrs = vec![
         JSPropertyItem::func(c_str!("newSimple2d"), Some(c_new_simple2d), 1),
         JSPropertyItem::func(c_str!("fetchLoader"), Some(c_fetch_loader), 1),
         JSPropertyItem::func(c_str!("loadSync"), Some(c_load_sync), 1),
-        JSPropertyItem::func(c_str!("newImage"), Some(c_new_image), 1),
         JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1),
         JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1),
         JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
         JSPropertyItem::func(c_str!("destoryEntity"),Some(c_destory_entity) ,1),
         JSPropertyItem::func(c_str!("newBehavior"),Some(c_new_behavior) ,1),
+        JSPropertyItem::func(c_str!("getBehaviorValue"),Some(c_get_behavior_value), 1),
+        JSPropertyItem::func(c_str!("setBehaviorCallback"),Some(c_set_behavior_callback), 1),
         JSPropertyItem::func(c_str!("attachBehavior"),Some(c_attach_behavior) ,1),
         JSPropertyItem::func(c_str!("behaviorSetFoldFunc"),Some(behavior_set_fold_func), 1),
-        JSPropertyItem::func(c_str!("setTransformPositonB"),Some(set_transform_positon_b), 1),
         JSPropertyItem::func(c_str!("getViewPortSize"),Some(c_get_view_port_size), 1),
-
         JSPropertyItem::func(c_str!("getTextureSize"),Some(c_get_texture_size), 1),
         JSPropertyItem::func(c_str!("setParent"),Some(c_set_parent), 1),
+        JSPropertyItem::func(c_str!("getSpriteRectInfo"),Some(c_get_sprite_rect_info), 1),
         //component
         JSPropertyItem::func(c_str!("addCABEventRoot"),Some(c_add_cab_event_root) ,1),
         JSPropertyItem::func(c_str!("addRect2d"), Some(c_add_rect_2d), 1),
         JSPropertyItem::func(c_str!("addTransform"),Some(c_add_transform), 1),
-        JSPropertyItem::func(c_str!("addImageRender"),Some(c_add_image_render), 1)
+        JSPropertyItem::func(c_str!("addImageRender"),Some(c_add_image_render), 1),
+        JSPropertyItem::func(c_str!("addSpriteRender"),Some(c_add_sprite_render), 1),
+        JSPropertyItem::func(c_str!("addTextRender"),Some(c_add_text_render), 1),
+        JSPropertyItem::func(c_str!("addTransparent"),Some(c_add_transparent), 1),
+        //component attr
+        JSPropertyItem::func(c_str!("setTransformBehavior"),Some(set_transform_behavior),1),
+        JSPropertyItem::func(c_str!("setRect2dBehavior"),Some(set_rect2d_behavior),1),
+        JSPropertyItem::func(c_str!("setImageRenderBehavior"),Some(set_image_render_behavior),1)
     ];
-    ctx.set_property_function_list(app_obj, &app_attrs);
-    q::JS_SetModuleExport(ctx.c_ctx(), m, c_str!("g2d").as_ptr(), app_obj);
+    ctx.set_property_function_list(g2d_obj, &g2d_attrs);
+    q::JS_SetModuleExport(ctx.c_ctx(), m, c_str!("g2d").as_ptr(), g2d_obj);
 }
 
 /* #region Main */
@@ -188,108 +195,6 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
     }
 }
 
-/*#region newImage*/
-//TODO delete it
-pub unsafe extern "C" fn c_new_image(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
-    let args = std::slice::from_raw_parts(argv, count as usize);
-    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(
-        args[0],
-        WORLD_CLASS.as_ref().unwrap().class_id(),
-    ));
-    let tex_id = RawJsValue::deserialize_value(args[1], ctx).unwrap().as_int().unwrap();
-    let mut image_render = ImageRender::new(Handle::new(tex_id as u32));
-    let mut t = Transform::default();
-    let mut rect: Rect2D = Rect2D {
-        width: 100f32,
-        height: 100f32,
-        anchor: [0.5f32, 0.5f32],
-    };
-    let mut transparent = true;
-    let mut is_has_w = false;
-    let mut is_has_h = false;
-    let js_parent = RawJsValue::deserialize_value(args[2],ctx).ok().unwrap();
-    let may_e = match js_parent {
-        JSValue::Int(eid) => {
-            Some(world.entities().entity(eid as u32))
-        },
-        _ => None,
-    };
-    if count > 3 {
-        let js_object = RawJsValue::deserialize_value(args[3], ctx)
-            .ok()
-            .and_then(|jo| jo.into_object());
-        let object_map = &js_object.as_ref();
-
-        
-        let may_rect_js_value = object_map.and_then(|o| o.get(&String::from("rect")))
-                                          .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok());
-        if let Some(rect_js_value) = may_rect_js_value.as_ref() {
-            if let Some(width) = rect_js_value.object_get_number("width", ctx) {
-                rect.width = width as f32;
-                is_has_w = true;
-            }
-            if let Some(height) = rect_js_value.object_get_number("height", ctx) {
-                rect.height = height as f32;
-                is_has_h = true;
-            }
-        }
-        let may_t_map = object_map.and_then(|o| o.get(&String::from("trans")))
-                                  .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok())
-                                  .and_then(|v| v.into_object());
-        if let Some(t_map) = may_t_map.as_ref() {
-            if let Some(pos) = t_map.get(&String::from("pos")) {
-                let pos_arr = RawJsValue::deserialize_value(pos.inner().0, ctx).ok().and_then(|arr_val| arr_val.array_get_number());
-                if let Some(number_arr) = pos_arr {
-                    let x = number_arr.get(0).map(|n| *n as f32).unwrap_or(0f32);
-                    let y = number_arr.get(1).map(|n| *n as f32).unwrap_or(0f32);
-                    let z = number_arr.get(2).map(|n| *n as f32).unwrap_or(0f32);
-                    t.set_position(Vector3::new(x, y, z));
-                }
-            }
-            if let Some(scale) = t_map.get(&String::from("scale")) {
-                let scale_arr = RawJsValue::deserialize_value(scale.inner().0, ctx).ok().and_then(|arr_val| arr_val.array_get_number());
-                if let Some(number_arr) = scale_arr {
-                    let sx = number_arr.get(0).map(|n| *n as f32).unwrap_or(1f32);
-                    let sy = number_arr.get(1).map(|n| *n as f32).unwrap_or(1f32);
-                    t.set_scale(Vector3::new(sx, sy, 1f32));
-                }
-            }
-        }
-
-        let may_color_array = object_map.and_then(|o| o.get(&String::from("color")))
-                                        .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok())
-                                        .and_then(|v| v.array_get_number());
-        if let Some(color_array) = may_color_array {
-            let r = color_array.get(0).map(|n| *n as f32).unwrap_or(0f32);
-            let g = color_array.get(1).map(|n| *n as f32).unwrap_or(0f32);
-            let b = color_array.get(2).map(|n| *n as f32).unwrap_or(0f32);
-            let a = color_array.get(2).map(|n| *n as f32).unwrap_or(0f32);
-            image_render.set_color(r,g,b,a);
-        }
-
-        let may_transparent = object_map.and_then(|o| o.get(&String::from("transparent")))
-                           .and_then(|js_val| RawJsValue::deserialize_value(js_val.inner().0, ctx).ok())
-                           .and_then(|val| val.as_bool());
-        if let Some(is_transparent) = may_transparent {
-            transparent = is_transparent;
-        }
-    }
-    if !is_has_w || !is_has_h {
-        let storage = world.fetch::<AssetStorage<types::Texture>>();
-        if let Some(tex_ref) = storage.get_by_id(tex_id as u32) {
-            let (w,h) = tex_ref.texture_size();
-            if !is_has_w {
-                rect.width = w as f32;
-            }
-            if !is_has_h {
-                rect.height = h as f32;
-            }
-        }
-    }
-    let image = Image::create(world, rect, t, image_render,transparent,may_e);
-    RawJsValue::val_i32(image.id() as i32)
-}
-/*#endregion newImage*/
 
 pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
@@ -385,6 +290,23 @@ pub unsafe extern "C" fn c_new_behavior(ctx: *mut q::JSContext,_: q::JSValue,cou
     js_behavior.value()
 }
 
+pub unsafe extern "C" fn c_get_behavior_value(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+    let val = behavior.value();
+    val.0
+}
+
+pub unsafe extern "C" fn c_set_behavior_callback(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+    behavior.set_call_func(args[1].into());
+    RawJsValue::val_null()
+}
+
+
+
+
 pub unsafe extern "C" fn c_attach_behavior(_ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let event: &mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],EVENT_CLASS.as_ref().unwrap().class_id()));
@@ -400,27 +322,6 @@ pub unsafe extern "C" fn behavior_set_fold_func(ctx: *mut q::JSContext,_: q::JSV
     let args = std::slice::from_raw_parts(argv, count as usize);
     let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
     behavior.set_func(args[1].into());
-    RawJsValue::val_null()
-}
-
-pub unsafe extern "C" fn set_transform_positon_b(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
-    let args = std::slice::from_raw_parts(argv, count as usize);
-    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
-    let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[1],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
-    let entity = get_entity(world,args[2],ctx).unwrap();
-    let q_ctx = QJSContext(ctx);
-    behavior.set_callback(move |val|{
-     
-      let js_val:JSValue = RawJsValue::deserialize_value(val.0,q_ctx.0).unwrap();
-      if let Some(pos_arr) = js_val.as_array() {
-        let x = pos_arr.get_unchecked(0).as_number().unwrap_or(0f64);
-        let y = pos_arr.get_unchecked(1).as_number().unwrap_or(0f64);
-        let z = pos_arr.get_unchecked(2).as_number().unwrap_or(0f64);
-        let mut trans_storage = world.write_storage::<Transform>();
-        let t = trans_storage.get_mut(entity).unwrap();
-        t.set_position(Vector3::new(x as f32,y as  f32,z as f32));
-      }
-    });
     RawJsValue::val_null()
 }
 
@@ -557,7 +458,101 @@ pub unsafe extern "C" fn c_add_image_render(ctx: *mut q::JSContext,_: q::JSValue
     if storage.contains(entity) {
         return RawJsValue::val_bool(false)
     }
+    let mut mesh_storage = world.write_storage::<Mesh2D>();
     storage.insert(entity,image_render).unwrap();
+    mesh_storage.insert(entity,Mesh2D::default()).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+//addSpriteRender(world,e,sheet,sprite_name,typ,color)
+pub unsafe extern "C" fn c_add_sprite_render(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let sheet_id = RawJsValue::deserialize_value(args[2],ctx).unwrap().as_int().unwrap();
+    let sprite_name = RawJsValue::deserialize_value(args[3],ctx).unwrap().into_string().unwrap();
+    let mut sprite_render = SpriteRender::new(Handle::new(sheet_id as u32),&sprite_name);
+    let js_type = RawJsValue(args[4]).to_value(ctx).unwrap();
+    if let Some(num_arr) = js_type.array_get_number() {
+        let typ = num_arr[0] as i32;
+        match typ {
+            0 => sprite_render.set_type(ImageType::Simple),
+            1 => sprite_render.set_type(ImageType::Sliced(num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32,num_arr[4] as f32)),
+            2 => sprite_render.set_slice_type_by_cfg(num_arr[1] as usize,&world.fetch::<AssetStorage<SpriteSheet>>()),
+            3 => {
+                let ftyp = num_arr[1] as i32;
+                match ftyp {
+                    0 => sprite_render.set_type(ImageType::Filled(ImageFilledType::HorizontalLeft,num_arr[1] as f32)),
+                    1 => sprite_render.set_type(ImageType::Filled(ImageFilledType::HorizontalRight,num_arr[2] as f32)),
+                    2 => sprite_render.set_type(ImageType::Filled(ImageFilledType::VerticalTop,num_arr[3] as f32)),
+                    3 => sprite_render.set_type(ImageType::Filled(ImageFilledType::VerticalBottom,num_arr[4] as f32)),
+                    _ => ()
+                }
+            },
+            4 => sprite_render.set_type(ImageType::Tiled),
+            _ => ()
+        }
+    };
+    let js_color = RawJsValue(args[5]).to_value(ctx).unwrap();
+    if let Some(num_arr) = js_color.array_get_number() {
+        sprite_render.set_color(num_arr[0] as f32,num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32);
+    }
+
+    let mut storage = world.write_storage::<SpriteRender>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,sprite_render).unwrap();
+    let mut mesh_storage = world.write_storage::<Mesh2D>();
+    mesh_storage.insert(entity,Mesh2D::default()).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+pub unsafe extern "C" fn c_add_text_render(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let font_id = RawJsValue::deserialize_value(args[2],ctx).unwrap().as_int().unwrap();
+    let mut text_render = TextRender::new(Handle::new(font_id as u32));
+    let mut storage = world.write_storage::<TextRender>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    let js_text =  RawJsValue(args[3]).to_value(ctx).unwrap().into_string();
+    if let Some(text) = js_text {
+        text_render.set_text(&text);
+    }
+    let js_color = RawJsValue(args[4]).to_value(ctx).unwrap();
+    if let Some(num_arr) = js_color.array_get_number() {
+        text_render.set_color(num_arr[0] as f32,num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32);
+    }
+    let js_font_size = RawJsValue(args[5]).to_value(ctx).unwrap().as_int();
+    if let Some(font_size) = js_font_size {
+        text_render.set_font_size(font_size);
+    }
+    let js_line_mode = RawJsValue(args[6]).to_value(ctx).unwrap().as_int();
+    if let Some(line_mode) = js_line_mode {
+        if line_mode == 0 {
+            text_render.set_line_mode(LineMode::Single);
+        } else {
+            text_render.set_line_mode(LineMode::Wrap);
+        }
+    }
+    storage.insert(entity,text_render).unwrap();
+    let mut mesh_storage = world.write_storage::<Mesh2D>();
+    mesh_storage.insert(entity,Mesh2D::default()).unwrap();
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn c_add_transparent(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let mut storage = world.write_storage::<Transparent>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,Transparent).unwrap();
     RawJsValue::val_bool(true)
 }
 
@@ -577,8 +572,128 @@ pub unsafe extern "C" fn c_set_parent(ctx: *mut q::JSContext,_: q::JSValue,count
     RawJsValue::val_null()
 }
 
+pub unsafe extern "C" fn c_get_sprite_rect_info(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let sheet_id = RawJsValue(args[1]).to_value(ctx).unwrap().as_int().unwrap();
+    let sprite_name = RawJsValue(args[2]).to_value(ctx).unwrap().into_string().unwrap();
+    let may_spr:Option<Sprite> = world.fetch_mut::<AssetStorage<SpriteSheet>>().get(&Handle::new(sheet_id as u32))
+                       .and_then(|s| s.get_sprite(&sprite_name).map(|v| v.clone()) );
+    if let Some(spr) = may_spr {
+        let val = JSValue::Array(vec![JSValue::Float(spr.rect.x      as f64),
+                                      JSValue::Float(spr.rect.y      as f64),
+                                      JSValue::Float(spr.rect.width  as f64),
+                                      JSValue::Float(spr.rect.height as f64)]);
+        return val.to_c_value(ctx);
+    }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_transform_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
+    if let Some(b_js_pos)  =  b_map.get(&String::from("pos")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_pos.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_pos = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let mut trans_storage = mut_world.write_storage::<Transform>();
+            let t:&mut Transform = trans_storage.get_mut(entity).unwrap();
+            t.set_position(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
+            update_mesh_2d(mut_world,entity);
+        };
+        update_pos(behavior.value());
+        behavior.set_callback(move |val| {
+            update_pos(val);
+        })
+    }
+    let q2 = QJSContext(ctx);
+    if let Some(b_js_scale)  =  b_map.get(&String::from("scale")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_scale.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_scale = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let mut trans_storage = mut_world.write_storage::<Transform>();
+            let t:&mut Transform = trans_storage.get_mut(entity).unwrap();
+            t.set_scale(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
+            update_mesh_2d(mut_world,entity);
+        };
+        update_scale(behavior.value());
+        behavior.set_callback(move |val| {
+            update_scale(val);
+        })
+    }
+   
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_rect2d_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
+    if let Some(b_js_size)  =  b_map.get(&String::from("size")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_size.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_size = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let mut rect_storage = mut_world.write_storage::<Rect2D>();
+            let rect:&mut Rect2D = rect_storage.get_mut(entity).unwrap();
+            rect.width  = arr[0] as f32;
+            rect.height = arr[1] as f32;
+            update_mesh_2d(mut_world,entity);
+        };
+        update_size(behavior.value());
+        behavior.set_callback(move |val| {
+            update_size(val);
+        })
+    }
+    let q2 = QJSContext(ctx);
+    if let Some(b_js_anchor)  =  b_map.get(&String::from("anchor")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_anchor.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_anchor = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let mut rect_storage = mut_world.write_storage::<Rect2D>();
+            let rect:&mut Rect2D = rect_storage.get_mut(entity).unwrap();
+            rect.anchor[0]  = arr[0] as f32;
+            rect.anchor[1]  = arr[1] as f32;
+            update_mesh_2d(mut_world,entity);
+        };
+        update_anchor(behavior.value());
+        behavior.set_callback(move |val| {
+            update_anchor(val);
+        })
+    }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_image_render_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
+    if let Some(b_js_color)  =  b_map.get(&String::from("color")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_color.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_color = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let mut image_storage = mut_world.write_storage::<ImageRender>();
+            let image:&mut ImageRender = image_storage.get_mut(entity).unwrap();
+            image.set_color(arr[0] as f32,arr[1] as f32,arr[2] as f32,arr[3] as f32);
+            update_mesh_2d(mut_world,entity);
+        };
+        update_color(behavior.value());
+        behavior.set_callback(move|val| {
+            update_color(val);
+        })
+    }
+    RawJsValue::val_null()
+}
 
 /*#region tools*/
+unsafe fn get_w_e_m_q<'a>(argv: *mut q::JSValue,count:i32,ctx:*mut q::JSContext) -> (QJSWorld,Entity,HashMap<String,AutoDropJSValue>,QJSContext) {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: *mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity( std::mem::transmute(world),args[1],ctx).unwrap();
+    let b_map = RawJsValue::deserialize_value(args[2],ctx).unwrap().into_object().unwrap();
+    let q_ctx = QJSContext(ctx);
+    (QJSWorld(world),entity,b_map,q_ctx)
+}
+
 unsafe fn set_vector3_array(arr:&mut Vector3<f32>,js_val:q::JSValue,ctx:*mut q::JSContext) {
     let may_num_arr = RawJsValue::deserialize_value(js_val,ctx).ok().and_then(|f| f.array_get_number());
     if let Some(num_arr) = may_num_arr {
@@ -587,5 +702,12 @@ unsafe fn set_vector3_array(arr:&mut Vector3<f32>,js_val:q::JSValue,ctx:*mut q::
         arr.z = *num_arr.get_unchecked(2) as f32;
     }   
 }
+
+fn update_mesh_2d(world:&World,entity:Entity) {
+    let mut mesh_storage = world.write_storage::<Mesh2D>();
+    let mesh:&mut Mesh2D = mesh_storage.get_mut(entity).unwrap();
+    mesh.is_dirty = true;
+}
+
 
 /*#endregion newImage*/

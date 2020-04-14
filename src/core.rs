@@ -140,6 +140,11 @@ pub struct QJSContext(pub *mut q::JSContext);
 unsafe impl Send for QJSContext {}
 unsafe impl Sync for QJSContext {}
 
+#[derive(Copy,Clone)]
+pub struct QJSWorld(pub *mut World);
+unsafe impl Send for QJSWorld {}
+unsafe impl Sync for QJSWorld {}
+
 
 #[derive(Copy,Clone)]
 pub struct QJSValue(pub q::JSValue);
