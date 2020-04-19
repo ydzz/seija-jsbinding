@@ -108,7 +108,7 @@ impl JSFRPNode {
 
 impl Drop for JSFRPNode {
     fn drop(&mut self) {
-        dbg!("Drop JSFRPNode");
+       //dbg!("Drop JSFRPNode");
        for object in self.js_objects.iter() {
            AutoDropJSValue::drop_js_value(object.value(), self.ctx.as_ref().unwrap().0);
        }
@@ -192,8 +192,11 @@ impl IFRPObject for QJSValue {
     fn debug(&self,ctx:Self::Context) {
         unsafe {
             dbg!(self.0.tag);
-            let is_func = q::JS_IsFunction(ctx,self.0);
-            dbg!(is_func);
+            dbg!(RawJsValue(self.0).ref_count());
         }
+    }
+
+    fn add_ref_count(&self,count:i32) {
+        RawJsValue(self.0).add_ref_count(count);
     }
 }
