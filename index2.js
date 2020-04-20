@@ -14,9 +14,9 @@ function OnStart(world) {
   var root = addEventRoot(world);
   
   var sprite = mkSprite(world,sheet,"button",root);
-  var ev0 = g2d.getEvent(world,sprite,0,false);
-  var ev1 = g2d.getEvent(world,sprite,1,false);
-  var ev00 = chainEvent(ev0,(_) => "button-active");
+  var ev0 = g2d.getEvent(world,sprite,4,false);
+  var ev1 = g2d.getEvent(world,sprite,5,false);
+  var ev00 = chainEvent(ev0,(_) => "button-hover");
   var ev11 = chainEvent(ev1,(_) => "button");
   var mev = merageEvent([ev00,ev11]);
   

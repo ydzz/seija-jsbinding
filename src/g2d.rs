@@ -327,9 +327,6 @@ pub unsafe extern "C" fn c_set_behavior_callback(ctx: *mut q::JSContext,_: q::JS
     RawJsValue::val_null()
 }
 
-
-
-
 pub unsafe extern "C" fn c_attach_behavior(_ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let event: &mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],EVENT_CLASS.as_ref().unwrap().class_id()));
