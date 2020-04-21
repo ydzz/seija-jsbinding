@@ -3,7 +3,7 @@ use qjs_rs::{
     q, JSClass, JSClassOject, JSContext, JSPropertyItem, JSValue, RawJsValue,AutoDropJSValue,
 };
 use seija::assets::{errors::AssetLoadError, Handle,AssetStorage};
-use seija::common::{Rect2D, Transform,transform::{Parent}};
+use seija::common::{Rect2D, Transform,transform::{Parent},AnchorAlign};
 use seija::frp::{Event,Behavior};
 use seija::json::Value;
 use seija::math::Vector3;
@@ -68,7 +68,8 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("setTransformBehavior"),Some(set_transform_behavior),1),
         JSPropertyItem::func(c_str!("setRect2dBehavior"),Some(set_rect2d_behavior),1),
         JSPropertyItem::func(c_str!("setImageRenderBehavior"),Some(set_image_render_behavior),1),
-        JSPropertyItem::func(c_str!("setSpriteRenderBehavior"),Some(set_sprite_render_behavior),1)
+        JSPropertyItem::func(c_str!("setSpriteRenderBehavior"),Some(set_sprite_render_behavior),1),
+        JSPropertyItem::func(c_str!("setTextRenderBehavior"),Some(set_text_render_behavior),1)
     ];
     ctx.set_property_function_list(g2d_obj, &g2d_attrs);
     q::JS_SetModuleExport(ctx.c_ctx(), m, c_str!("g2d").as_ptr(), g2d_obj);
@@ -483,7 +484,7 @@ pub unsafe extern "C" fn c_add_image_render(ctx: *mut q::JSContext,_: q::JSValue
     RawJsValue::val_bool(true)
 }
 
-//addSpriteRender(world,e,sheet,sprite_name,typ,color)
+
 pub unsafe extern "C" fn c_add_sprite_render(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
@@ -705,7 +706,6 @@ pub unsafe extern "C" fn set_image_render_behavior(ctx: *mut q::JSContext,_: q::
 
 pub unsafe extern "C" fn set_sprite_render_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
-    
     if let Some(b_js_sprite_name)  =  b_map.get(&String::from("spriteName")) {
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_sprite_name.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_sprite_name = move |val:QJSValue| {
@@ -736,6 +736,89 @@ pub unsafe extern "C" fn set_sprite_render_behavior(ctx: *mut q::JSContext,_: q:
         behavior.set_callback(move|val| {
             update_color(val);
         })
+    }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_text_render_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
+    if let Some(b_js_text)  =  b_map.get(&String::from("text")) {
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_text.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_text = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let mut text_storage = mut_world.write_storage::<TextRender>();
+            let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
+            let b_str = RawJsValue(val.0).to_value(q_ctx.0).unwrap().into_string().unwrap();
+            text.set_text(&b_str);
+        };
+        update_text(behavior.value());
+        behavior.set_callback(move |val| {
+            update_text(val);
+        })
+    }
+    if let Some(b_js_color)  =  b_map.get(&String::from("color")) {
+        let q2 = QJSContext(ctx);
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_color.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_color = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let mut text_storage = mut_world.write_storage::<TextRender>();
+            let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
+            text.set_color(arr[0] as f32,arr[1] as f32,arr[2] as f32,arr[3] as f32);
+        };
+        update_color(behavior.value());
+        behavior.set_callback(move |val| {
+            update_color(val);
+        })
+    }
+    if let Some(b_js_linemode)  =  b_map.get(&String::from("lineMode")) {
+        let q3 = QJSContext(ctx);
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_linemode.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_line_mode = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let line_mode_num = RawJsValue(val.0).to_value(q3.0).unwrap().as_int().unwrap();
+            let mut text_storage = mut_world.write_storage::<TextRender>();
+            let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
+            let line_mode = match line_mode_num {
+                0 => LineMode::Single,
+                _ => LineMode::Wrap
+            };
+            text.set_line_mode(line_mode);
+        };
+        update_line_mode(behavior.value());
+        behavior.set_callback(move |val| {
+            update_line_mode(val);
+        });
+    }
+    if let Some(b_js_anchor)  =  b_map.get(&String::from("anchor")) {
+        let q = QJSContext(ctx);
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_anchor.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_anchor = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let anchor:AnchorAlign = AnchorAlign::from(RawJsValue(val.0).to_value(q.0).unwrap().as_int().unwrap() as u32);
+            let mut text_storage = mut_world.write_storage::<TextRender>();
+            let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
+            text.set_anchor(anchor);
+        };
+        update_anchor(behavior.value());
+        behavior.set_callback(move |val| {
+            update_anchor(val);
+        });
+    }
+    if let Some(b_js_font_size)  =  b_map.get(&String::from("fontSize")) {
+        let q = QJSContext(ctx);
+        let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_font_size.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+        let update_font_size = move |val:QJSValue| {
+            let mut_world:&mut World = std::mem::transmute(qworld.0);
+            let font_size = RawJsValue(val.0).to_value(q.0).unwrap().as_int().unwrap();
+            let mut text_storage = mut_world.write_storage::<TextRender>();
+            let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
+            text.set_font_size(font_size);
+        };
+        update_font_size(behavior.value());
+        behavior.set_callback(move |val| {
+            update_font_size(val);
+        });
     }
     RawJsValue::val_null()
 }
