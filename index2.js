@@ -6,7 +6,6 @@ var s2d = g2d.newSimple2d({
 
 var myapp = app.newApp(s2d,{OnStart,ResPath: "../seija/examples/first/res/"});
 
- 
 
 function OnStart(world) {
   var loader = g2d.fetchLoader(world);
@@ -23,12 +22,22 @@ function OnStart(world) {
   var mev = merageEvent([AEv,SEv]);
 
   var eText = mkText(world,font,"?",root);
-  var b = g2d.newBehavior("0");
+  var b = g2d.newBehavior(0);
   g2d.attachBehavior(mev,b);
   setBehaviorFoldFunc(b,function(old,ev) {
-    return (parseInt(old) + ev).toString();
+    return old + ev;
   });
-  g2d.setTextRenderBehavior(world,eText,{text:b });
+  var tagE = tagBehavior(b,mev);
+  var tb = g2d.newBehavior("0");
+  setBehaviorFoldFunc(tb,function(old,ev) {
+    return "tag:" + ev.toString();
+  });
+  g2d.attachBehavior(tagE,tb);
+  g2d.setTextRenderBehavior(world,eText,{text:tb });
+
+ 
+  
+ 
   /*
   var ev0 = g2d.getEvent(world,sprite,4,false);
   var ev1 = g2d.getEvent(world,sprite,5,false);
@@ -42,6 +51,8 @@ function OnStart(world) {
   g2d.setSpriteRenderBehavior(world,sprite,{spriteName:b });
   */
 }
+
+
 
 function mkSprite(world,sheet,sprName,posX,p) {
   var e = g2d.newEntity(world);
@@ -95,6 +106,15 @@ function chainEvent(event,f) {
   }
   event.childrens.push(newEvent);
   return newEvent;
+}
+
+function tagBehavior(b,ev) {
+  var te = g2d.tagBehavior(b,ev);
+  if(ev.childrens == undefined) {
+    ev.childrens = [];
+  }
+  ev.childrens.push(te);
+  return te;
 }
 
 app.runApp(myapp);

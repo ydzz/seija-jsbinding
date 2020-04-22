@@ -44,6 +44,8 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1),
         JSPropertyItem::func(c_str!("mergeEvent"),Some(c_merge_event),1),
         JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1),
+        JSPropertyItem::func(c_str!("mapBehavior"),Some(c_map_behavior) ,1),
+        JSPropertyItem::func(c_str!("tagBehavior"),Some(c_tag_behavior) ,1),
         JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
         JSPropertyItem::func(c_str!("destoryEntity"),Some(c_destory_entity) ,1),
@@ -290,6 +292,34 @@ pub unsafe extern "C" fn c_chain_event(ctx: *mut q::JSContext,_: q::JSValue,coun
     let event_class: &JSClass = EVENT_CLASS.as_ref().unwrap();
     let mut event_object: JSClassOject = event_class.new_object(ctx);
     event_object.set_opaque(event_ptr);
+    event_object.value()
+}
+
+pub unsafe extern "C" fn c_map_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+    let b_ref:*mut q::JSValue = &mut behavior.value.0;
+    let new_val = q::JS_Call(ctx,args[1],RawJsValue::val_null(),1,b_ref);
+    
+    let mut new_behavior = Box::new(Behavior::new(QJSValue(new_val),ctx));
+    let behavior_class: &JSClass = BEHAVIOR_CLASS.as_ref().unwrap();
+    let mut js_behavior = behavior_class.new_object(ctx);
+    new_behavior.set_object(QJSValue(js_behavior.value()));
+    js_behavior.set_opaque(Box::into_raw(new_behavior));
+    js_behavior.value()
+}
+pub unsafe extern "C" fn c_tag_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let behavior: *mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
+    let event: &mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[1],EVENT_CLASS.as_ref().unwrap().class_id()));
+
+    let mut new_event:Arc<Event<QJSValue>> = Arc::new(Event::default());
+    let new_event_ptr:*mut Event<QJSValue> = std::mem::transmute(Arc::get_mut(&mut new_event).unwrap());
+    let mut event_object: JSClassOject =  EVENT_CLASS.as_ref().unwrap().new_object(ctx);
+    event_object.set_opaque(new_event_ptr);
+
+    RawJsValue((&*behavior).object.unwrap().0).add_ref_count(1);
+    event.add_tag_event(behavior,new_event);
     event_object.value()
 }
 
