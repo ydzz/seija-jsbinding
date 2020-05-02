@@ -19,7 +19,6 @@ use seija::specs::{shred::FetchMut,Entity,World,WorldExt,world::{Builder}};
 use seija::win::{dpi::LogicalSize, WindowBuilder};
 use std::collections::HashMap;
 use std::os::raw::c_int;
-use std::sync::{Arc};
 use crate::core::{JSFRPNode,QJSValue,QJSContext,QJSWorld};
 
 pub static mut SIMPLE2D_CLASS: Option<JSClass> = None;
@@ -44,6 +43,8 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1),
         JSPropertyItem::func(c_str!("mergeEvent"),Some(c_merge_event),1),
         JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1),
+        JSPropertyItem::func(c_str!("newEvent"),Some(c_new_event) ,1),
+        JSPropertyItem::func(c_str!("setNextEvent"),Some(c_set_next_event) ,1),
         JSPropertyItem::func(c_str!("mapBehavior"),Some(c_map_behavior) ,1),
         JSPropertyItem::func(c_str!("tagBehavior"),Some(c_tag_behavior) ,1),
         JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
@@ -98,7 +99,9 @@ unsafe extern "C" fn simple2d_finalizer(_rt: *mut q::JSRuntime, _val: q::JSValue
     Box::from_raw(ptr);*/
 }
 
-unsafe extern "C" fn event_finalizer(_rt: *mut q::JSRuntime, _val: q::JSValue) {
+unsafe extern "C" fn event_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue) {
+    let event: *mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(val,EVENT_CLASS.as_ref().unwrap().class_id()));
+    Box::from_raw(event);
     dbg!("event finalizer");
 }
 
@@ -207,15 +210,15 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
 pub unsafe extern "C" fn c_merge_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let js_event_arr:Vec<AutoDropJSValue> = RawJsValue::deserialize_value_(args[0], ctx,true).unwrap().into_array_raw().unwrap();
-    let mut rc_event:Arc<Event<QJSValue>> = Arc::new(Event::default());
+    let new_event= Box::new(Event::default());
     let event_class: &JSClass = EVENT_CLASS.as_ref().unwrap();
-    let rc_event_ptr:*mut Event<QJSValue> = std::mem::transmute(Arc::get_mut(&mut rc_event).unwrap());
+    let new_event_ptr:*mut Event<QJSValue> = Box::into_raw(new_event);
     let mut event_object: JSClassOject = event_class.new_object(ctx);
-    event_object.set_opaque(rc_event_ptr);
+    event_object.set_opaque(new_event_ptr);
     for js_ev in js_event_arr.iter() {
        let jse = js_ev.inner().0;
        let event: &mut Event<QJSValue> = event_ptr(jse);
-       event.chain_rc_next(rc_event.clone());
+       event.set_next_event(new_event_ptr);
     }
     event_object.value()
 }
@@ -232,10 +235,10 @@ pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count:
     let e = world.entities().entity(eid as u32);
     let mut frp_node_storage = world.write_storage::<JSFRPNode>();
     let mut event_storage = world.write_storage::<EventNode>();
-    let event_type_id = RawJsValue::deserialize_value(args[2],ctx).ok().and_then(|q| q.as_int().map(|n| n as u32)).unwrap_or(0u32);
-    let mut new_event = Arc::new(Event::default());
-    
-    let event_ptr:*mut Event<QJSValue>  = std::mem::transmute(Arc::get_mut(&mut new_event).unwrap());
+    let event_type_id = RawJsValue::deserialize_value(args[2],ctx).ok()
+                                         .and_then(|q| q.as_int().map(|n| n as u32)).unwrap_or(0u32);
+    let new_event:Box<Event<QJSValue>> = Box::new(Event::default());
+    let event_ptr:*mut Event<QJSValue>  = Box::into_raw(new_event);
     let event_class: &JSClass = EVENT_CLASS.as_ref().unwrap();
     let mut event_object: JSClassOject = event_class.new_object(ctx);
     event_object.set_opaque(event_ptr);
@@ -243,13 +246,13 @@ pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count:
     if !frp_node_storage.contains(e) {
         let mut frp_node = JSFRPNode::default();
         frp_node.set_ctx(ctx);
-        frp_node.add_event(event_type_id,new_event);
+        frp_node.add_event(event_type_id,event_ptr);
         frp_node.push_js_object(event_object);
         frp_node_storage.insert(e,frp_node).unwrap();
     } else {
         let frp_node = frp_node_storage.get_mut(e).unwrap();
         frp_node.push_js_object(event_object);
-        frp_node.add_event(event_type_id,new_event);
+        frp_node.add_event(event_type_id,event_ptr);
     }
     if !event_storage.contains(e) {
         let ev = EventNode::default();
@@ -264,7 +267,8 @@ pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count:
         let frp_node_storage = world.write_storage::<JSFRPNode>();
         let frp_node = frp_node_storage.get(e).unwrap();
         if let Some(event_ref) = frp_node.events().get(&event_type_id) {
-            event_ref.on_fire(RawJsValue::val_i32(eid).into(),qctx.0);
+            let mut_ref = &mut **event_ref;
+            mut_ref.on_fire(RawJsValue::val_i32(eid).into(),qctx.0);
         }
     });
    
@@ -295,6 +299,24 @@ pub unsafe extern "C" fn c_chain_event(ctx: *mut q::JSContext,_: q::JSValue,coun
     event_object.value()
 }
 
+pub unsafe extern "C" fn c_set_next_event(_ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let event_class_id = EVENT_CLASS.as_ref().unwrap().class_id();
+    let event: &mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],event_class_id));
+    let nex_event: *mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[1],event_class_id));
+    event.set_next_event(nex_event);
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn c_new_event(ctx: *mut q::JSContext,_: q::JSValue,_count: c_int,_argv: *mut q::JSValue) -> q::JSValue {
+    let new_event:Box<Event<QJSValue>> = Box::new(Event::default());
+    let event_ptr:*mut Event<QJSValue>  = Box::into_raw(new_event);
+    let event_class: &JSClass = EVENT_CLASS.as_ref().unwrap();
+    let mut event_object: JSClassOject = event_class.new_object(ctx);
+    event_object.set_opaque(event_ptr);
+    event_object.value()
+}
+
 pub unsafe extern "C" fn c_map_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
@@ -313,13 +335,13 @@ pub unsafe extern "C" fn c_tag_behavior(ctx: *mut q::JSContext,_: q::JSValue,cou
     let behavior: *mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
     let event: &mut Event<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[1],EVENT_CLASS.as_ref().unwrap().class_id()));
 
-    let mut new_event:Arc<Event<QJSValue>> = Arc::new(Event::default());
-    let new_event_ptr:*mut Event<QJSValue> = std::mem::transmute(Arc::get_mut(&mut new_event).unwrap());
+    let new_event:Box<Event<QJSValue>> = Box::new(Event::default());
+    let new_event_ptr:*mut Event<QJSValue> = Box::into_raw(new_event);
     let mut event_object: JSClassOject =  EVENT_CLASS.as_ref().unwrap().new_object(ctx);
     event_object.set_opaque(new_event_ptr);
 
     RawJsValue((&*behavior).object.unwrap().0).add_ref_count(1);
-    event.add_tag_event(behavior,new_event);
+    event.add_tag_event(behavior,new_event_ptr);
     event_object.value()
 }
 
