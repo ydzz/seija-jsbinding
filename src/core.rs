@@ -2,7 +2,6 @@ use seija::core::IGame;
 use seija::specs::{World,WorldExt,Builder,Component,DenseVecStorage};
 use seija::common::{Transform};
 use seija::render::{ActiveCamera,Camera};
-use seija::assets::{AssetEnv};
 use seija::module_bundle::{S2DLoader};
 use std::sync::{Arc};
 use std::ops::{Deref,DerefMut};
@@ -58,7 +57,7 @@ impl IGame for JSGame {
         let camera_transform = Transform::default();
         let entity = world.create_entity().with(camera_transform).with(Camera::standard_2d(1024f32, 768f32)).build();
         world.insert(ActiveCamera {entity : Some(entity) });
-        world.fetch::<Arc<AssetEnv>>().set_fs_root(self.res_path.as_str());
+        world.fetch::<S2DLoader>().env().set_fs_root(self.res_path.as_str());
         if let Some(ref fn_val) = self.on_start {
             unsafe {
                let ret_val = q::JS_Call(self.ctx,fn_val.inner().0,RawJsValue::val_null(),1,&mut self.world_object.value());
@@ -189,11 +188,9 @@ impl IFRPObject for QJSValue {
         AutoDropJSValue::drop_js_value(self.0, ctx)
     }
 
-    fn debug(&self,ctx:Self::Context) {
-        unsafe {
-            dbg!(self.0.tag);
-            dbg!(RawJsValue(self.0).ref_count());
-        }
+    fn debug(&self,_:Self::Context) {
+        dbg!(self.0.tag);
+        dbg!(RawJsValue(self.0).ref_count());
     }
 
     fn add_ref_count(&self,count:i32) {

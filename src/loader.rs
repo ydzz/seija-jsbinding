@@ -1,6 +1,5 @@
 use qjs_rs::{JSContext,q,JSPropertyItem,RawJsValue};
 use std::os::raw::{c_int};
-use seija::assets::{Loader};
 
 pub unsafe fn loader_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
     let app_obj = q::JS_NewObject(ctx.c_ctx());

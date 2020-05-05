@@ -2,17 +2,18 @@ use crate::core::WORLD_CLASS;
 use qjs_rs::{
     q, JSClass, JSClassOject, JSContext, JSPropertyItem, JSValue, RawJsValue,AutoDropJSValue,
 };
-use seija::assets::{errors::AssetLoadError, Handle,AssetStorage};
-use seija::common::{Rect2D, Transform,transform::{Parent},AnchorAlign};
+use seija::rendy::texture::{image::{ImageTextureConfig}};
+use seija::assets::{AssetLoadError, Handle,AssetStorage,TextuteLoaderInfo,SpriteSheetLoaderInfo,FontAssetLoaderInfo};
+use seija::common::{Rect2D, Transform,transform::{Parent,component::{ParentHierarchy}},AnchorAlign};
 use seija::frp::{Event,Behavior};
-use seija::json::Value;
 use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
     Transparent,
     components::{ImageRender,SpriteRender,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
-    types, FontAsset,
+    types,
 };
+use seija::rendy::hal::image::{SamplerDesc,Filter,WrapMode};
 use seija::window::{ViewPortSize};
 use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType};
 use seija::specs::{shred::FetchMut,Entity,World,WorldExt,world::{Builder}};
@@ -47,18 +48,21 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("setNextEvent"),Some(c_set_next_event) ,1),
         JSPropertyItem::func(c_str!("mapBehavior"),Some(c_map_behavior) ,1),
         JSPropertyItem::func(c_str!("tagBehavior"),Some(c_tag_behavior) ,1),
-        JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
-        JSPropertyItem::func(c_str!("destoryEntity"),Some(c_destory_entity) ,1),
         JSPropertyItem::func(c_str!("newBehavior"),Some(c_new_behavior) ,1),
         JSPropertyItem::func(c_str!("getBehaviorValue"),Some(c_get_behavior_value), 1),
         JSPropertyItem::func(c_str!("setBehaviorCallback"),Some(c_set_behavior_callback), 1),
         JSPropertyItem::func(c_str!("attachBehavior"),Some(c_attach_behavior) ,1),
-        JSPropertyItem::func(c_str!("behaviorSetFoldFunc"),Some(behavior_set_fold_func), 1),
+        JSPropertyItem::func(c_str!("setBehaviorFoldFunc"),Some(behavior_set_fold_func), 1),
         JSPropertyItem::func(c_str!("getViewPortSize"),Some(c_get_view_port_size), 1),
         JSPropertyItem::func(c_str!("getTextureSize"),Some(c_get_texture_size), 1),
-        JSPropertyItem::func(c_str!("setParent"),Some(c_set_parent), 1),
         JSPropertyItem::func(c_str!("getSpriteRectInfo"),Some(c_get_sprite_rect_info), 1),
+        //entity
+        JSPropertyItem::func(c_str!("newEntity"),Some(c_new_entity) ,1),
+        JSPropertyItem::func(c_str!("setParent"),Some(c_set_parent), 1),
+        JSPropertyItem::func(c_str!("removeAllChildren"),Some(c_remove_all_children), 1),
+        JSPropertyItem::func(c_str!("destoryEntity"),Some(c_destory_entity) ,1),
+        JSPropertyItem::func(c_str!("getChildrens"),Some(c_get_childrens) ,1),
         //component
         JSPropertyItem::func(c_str!("addCABEventRoot"),Some(c_add_cab_event_root) ,1),
         JSPropertyItem::func(c_str!("addRect2d"), Some(c_add_rect_2d), 1),
@@ -190,10 +194,10 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
     let asset_type = RawJsValue::deserialize_value(args[2], ctx).unwrap().as_int().unwrap();
     let asset_path = RawJsValue::deserialize_value(args[3], ctx).unwrap().into_string().unwrap();
     let may_asset_id = match asset_type {
-        0 => loader.load_sync::<Value, DefaultBackend>(&asset_path, world).map(|h| h.id()),
-        1 => loader.load_sync::<types::Texture, DefaultBackend>(&asset_path, world).map(|h| h.id()),
-        2 => loader.load_sync::<SpriteSheet, DefaultBackend>(&asset_path, world).map(|h| h.id()),
-        3 => loader.load_sync::<FontAsset, DefaultBackend>(&asset_path, world).map(|h| h.id()),
+        //0 => loader.load_sync::<Value, DefaultBackend>(&asset_path, world).map(|h| h.id()),
+        1 => loader.load_sync::<_, DefaultBackend>(TextuteLoaderInfo::new_only_path(&asset_path), world).map(|h| h.id()),
+        2 => loader.load_sync::<_, DefaultBackend>(SpriteSheetLoaderInfo::new_only_path(&asset_path), world).map(|h| h.id()),
+        3 => loader.load_sync::<_, DefaultBackend>(FontAssetLoaderInfo::new(&asset_path), world).map(|h| h.id()),
         _ => Err(AssetLoadError::NotFoundLoader),
     };
     if may_asset_id.is_ok() {
@@ -204,6 +208,28 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
         let str_err = format!("{:?}", err);
         RawJsValue::val_string(&str_err, ctx)
     }
+}
+
+fn parse_image_config(val:q::JSValue,ctx:*mut q::JSContext) -> ImageTextureConfig {
+    if let Some(obj) = RawJsValue::deserialize_value(val, ctx).ok().and_then(|v| v.into_object()) {
+        let mut config = ImageTextureConfig::default();
+        let js_s_info = obj.get(&String::from("sampler_info")).and_then(|v|v.inner().to_value(ctx).ok()).and_then(|v|v.as_array_int());
+        if let Some(s_type) = js_s_info {
+            match *s_type.as_slice() {
+                [0,0] => config.sampler_info = SamplerDesc::new(Filter::Nearest, WrapMode::Tile),
+                [0,1] => config.sampler_info = SamplerDesc::new(Filter::Nearest, WrapMode::Mirror),
+                [0,2] => config.sampler_info = SamplerDesc::new(Filter::Nearest, WrapMode::Clamp),
+                [0,3] => config.sampler_info = SamplerDesc::new(Filter::Nearest, WrapMode::Border),
+                [1,0] => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Tile),
+                [1,1] => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Mirror),
+                [1,2] => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Clamp),
+                [1,3] => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Border),
+                _ => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Clamp),
+            };
+        }
+        return config;
+    }
+    ImageTextureConfig::default()
 }
 
 //mev <- mergeEvent [e0 $> "button",e1 $> "button-active"]
@@ -264,11 +290,14 @@ pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count:
     let ev_node:&mut EventNode = event_storage.get_mut(e).unwrap();
     let qctx = QJSContext(ctx);
     ev_node.register(is_capture,typ,move |e,world| {
-        let frp_node_storage = world.write_storage::<JSFRPNode>();
-        let frp_node = frp_node_storage.get(e).unwrap();
-        if let Some(event_ref) = frp_node.events().get(&event_type_id) {
-            let mut_ref = &mut **event_ref;
-            mut_ref.on_fire(RawJsValue::val_i32(eid).into(),qctx.0);
+       
+        let is_has_event = world.read_storage::<JSFRPNode>().get(e).unwrap().events().contains_key(&event_type_id);
+        if is_has_event {
+            let may_ev = {
+                *world.read_storage::<JSFRPNode>().get(e).unwrap().events().get(&event_type_id).unwrap()
+           };
+           let mut_ref = &mut *may_ev;
+           mut_ref.on_fire(RawJsValue::val_i32(eid).into(),qctx.0);
         }
     });
    
@@ -283,7 +312,7 @@ pub unsafe extern "C" fn c_new_entity(_ctx: *mut q::JSContext,_: q::JSValue,coun
     RawJsValue::val_i32(e.id() as i32)
 }
 
-pub unsafe extern "C" fn c_ref_count(ctx: *mut q::JSContext,_: q::JSValue,_count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_ref_count(_ctx: *mut q::JSContext,_: q::JSValue,_count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let raw_js = RawJsValue(*argv);
     RawJsValue::val_i32(raw_js.ref_count())
 }
@@ -365,7 +394,7 @@ pub unsafe extern "C" fn c_new_behavior(ctx: *mut q::JSContext,_: q::JSValue,cou
     js_behavior.value()
 }
 
-pub unsafe extern "C" fn c_get_behavior_value(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_get_behavior_value(_: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
     let val = behavior.value();
@@ -373,7 +402,7 @@ pub unsafe extern "C" fn c_get_behavior_value(ctx: *mut q::JSContext,_: q::JSVal
     val.0
 }
 
-pub unsafe extern "C" fn c_set_behavior_callback(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_set_behavior_callback(_: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
     behavior.set_call_func(args[1].into());
@@ -390,7 +419,7 @@ pub unsafe extern "C" fn c_attach_behavior(_ctx: *mut q::JSContext,_: q::JSValue
     RawJsValue::val_bool(true)
 }
 
-pub unsafe extern "C" fn behavior_set_fold_func(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn behavior_set_fold_func(_: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(args[0],BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
     behavior.set_func(args[1].into());
@@ -513,7 +542,7 @@ pub unsafe extern "C" fn c_add_image_render(ctx: *mut q::JSContext,_: q::JSValue
     let tex_id = RawJsValue::deserialize_value(args[2],ctx).unwrap().as_int().unwrap();
     let mut image_render = ImageRender::new(Handle::new(tex_id as u32));
     if count > 3 {
-        let may_num_arr = RawJsValue::deserialize_value(args[3],ctx).ok().and_then(|f| f.array_get_number());
+        let may_num_arr = RawJsValue::deserialize_value(args[3],ctx).ok().and_then(|f| f.as_array_number());
         if let Some(num_arr) = may_num_arr {
             image_render.set_color(*num_arr.get_unchecked(0) as f32,*num_arr.get_unchecked(1) as f32,
                                    *num_arr.get_unchecked(2) as f32,*num_arr.get_unchecked(3) as f32);
@@ -545,7 +574,7 @@ pub unsafe extern "C" fn c_add_sprite_render(ctx: *mut q::JSContext,_: q::JSValu
     let sprite_name = RawJsValue::deserialize_value(args[3],ctx).unwrap().into_string().unwrap();
     let mut sprite_render = SpriteRender::new(Handle::new(sheet_id as u32),&sprite_name);
     let js_type = RawJsValue(args[4]).to_value(ctx).unwrap();
-    if let Some(num_arr) = js_type.array_get_number() {
+    if let Some(num_arr) = js_type.as_array_number() {
         let typ = num_arr[0] as i32;
         match typ {
             0 => sprite_render.set_type(ImageType::Simple),
@@ -566,7 +595,7 @@ pub unsafe extern "C" fn c_add_sprite_render(ctx: *mut q::JSContext,_: q::JSValu
         }
     };
     let js_color = RawJsValue(args[5]).to_value(ctx).unwrap();
-    if let Some(num_arr) = js_color.array_get_number() {
+    if let Some(num_arr) = js_color.as_array_number() {
         sprite_render.set_color(num_arr[0] as f32,num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32);
     }
 
@@ -595,7 +624,7 @@ pub unsafe extern "C" fn c_add_text_render(ctx: *mut q::JSContext,_: q::JSValue,
         text_render.set_text(&text);
     }
     let js_color = RawJsValue(args[4]).to_value(ctx).unwrap();
-    if let Some(num_arr) = js_color.array_get_number() {
+    if let Some(num_arr) = js_color.as_array_number() {
         text_render.set_color(num_arr[0] as f32,num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32);
     }
     let js_font_size = RawJsValue(args[5]).to_value(ctx).unwrap().as_int();
@@ -644,6 +673,30 @@ pub unsafe extern "C" fn c_set_parent(ctx: *mut q::JSContext,_: q::JSValue,count
     RawJsValue::val_null()
 }
 
+pub unsafe extern "C" fn c_remove_all_children(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity  = get_entity(world, args[1], ctx).unwrap();
+    let hierarchy = world.fetch_mut::<ParentHierarchy>();
+    let entities = world.entities();
+    for ce in hierarchy.all_children_iter(entity) {
+        entities.delete(ce).unwrap();
+    }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn c_get_childrens(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity  = get_entity(world, args[1], ctx).unwrap();
+    let hierarchy = world.fetch_mut::<ParentHierarchy>();
+    let mut arr:Vec<JSValue> = vec![];
+    for ce in hierarchy.all_children_iter(entity) {
+        arr.push(JSValue::Int(ce.id() as i32));
+    }
+    JSValue::Array(arr).to_c_value(ctx)
+}
+
 pub unsafe extern "C" fn c_get_sprite_rect_info(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
@@ -667,7 +720,7 @@ pub unsafe extern "C" fn set_transform_behavior(ctx: *mut q::JSContext,_: q::JSV
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_pos.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_pos = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().as_array_number().unwrap();
             let mut trans_storage = mut_world.write_storage::<Transform>();
             let t:&mut Transform = trans_storage.get_mut(entity).unwrap();
             t.set_position(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
@@ -683,7 +736,7 @@ pub unsafe extern "C" fn set_transform_behavior(ctx: *mut q::JSContext,_: q::JSV
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_scale.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_scale = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().as_array_number().unwrap();
             let mut trans_storage = mut_world.write_storage::<Transform>();
             let t:&mut Transform = trans_storage.get_mut(entity).unwrap();
             t.set_scale(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
@@ -704,7 +757,7 @@ pub unsafe extern "C" fn set_rect2d_behavior(ctx: *mut q::JSContext,_: q::JSValu
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_size.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_size = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().as_array_number().unwrap();
             let mut rect_storage = mut_world.write_storage::<Rect2D>();
             let rect:&mut Rect2D = rect_storage.get_mut(entity).unwrap();
             rect.width  = arr[0] as f32;
@@ -721,7 +774,7 @@ pub unsafe extern "C" fn set_rect2d_behavior(ctx: *mut q::JSContext,_: q::JSValu
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_anchor.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_anchor = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().as_array_number().unwrap();
             let mut rect_storage = mut_world.write_storage::<Rect2D>();
             let rect:&mut Rect2D = rect_storage.get_mut(entity).unwrap();
             rect.anchor[0]  = arr[0] as f32;
@@ -742,7 +795,7 @@ pub unsafe extern "C" fn set_image_render_behavior(ctx: *mut q::JSContext,_: q::
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_color.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_color = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q_ctx.0).unwrap().as_array_number().unwrap();
             let mut image_storage = mut_world.write_storage::<ImageRender>();
             let image:&mut ImageRender = image_storage.get_mut(entity).unwrap();
             image.set_color(arr[0] as f32,arr[1] as f32,arr[2] as f32,arr[3] as f32);
@@ -778,7 +831,7 @@ pub unsafe extern "C" fn set_sprite_render_behavior(ctx: *mut q::JSContext,_: q:
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_color.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_color = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().as_array_number().unwrap();
             let mut sprite_storage = mut_world.write_storage::<SpriteRender>();
             let sprite:&mut SpriteRender = sprite_storage.get_mut(entity).unwrap();
             sprite.set_color(arr[0] as f32,arr[1] as f32,arr[2] as f32,arr[3] as f32);
@@ -813,7 +866,7 @@ pub unsafe extern "C" fn set_text_render_behavior(ctx: *mut q::JSContext,_: q::J
         let behavior: &mut Behavior<QJSValue> = std::mem::transmute(q::JS_GetOpaque(b_js_color.inner().0,BEHAVIOR_CLASS.as_ref().unwrap().class_id()));
         let update_color = move |val:QJSValue| {
             let mut_world:&mut World = std::mem::transmute(qworld.0);
-            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().array_get_number().unwrap();
+            let arr = RawJsValue(val.0).to_value(q2.0).unwrap().as_array_number().unwrap();
             let mut text_storage = mut_world.write_storage::<TextRender>();
             let text:&mut TextRender = text_storage.get_mut(entity).unwrap();
             text.set_color(arr[0] as f32,arr[1] as f32,arr[2] as f32,arr[3] as f32);
@@ -886,7 +939,7 @@ unsafe fn get_w_e_m_q<'a>(argv: *mut q::JSValue,count:i32,ctx:*mut q::JSContext)
 }
 
 unsafe fn set_vector3_array(arr:&mut Vector3<f32>,js_val:q::JSValue,ctx:*mut q::JSContext) {
-    let may_num_arr = RawJsValue::deserialize_value(js_val,ctx).ok().and_then(|f| f.array_get_number());
+    let may_num_arr = RawJsValue::deserialize_value(js_val,ctx).ok().and_then(|f| f.as_array_number());
     if let Some(num_arr) = may_num_arr {
         arr.x = *num_arr.get_unchecked(0) as f32;
         arr.y = *num_arr.get_unchecked(1) as f32;

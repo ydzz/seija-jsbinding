@@ -52,6 +52,6 @@ mod tests {
         let mut ctx = JSContext::new(&runtime).unwrap();
         init_internal(&mut ctx,&mut runtime);
         binding_all(&mut ctx);
-        boot_start(&mut ctx,"./index2.js").unwrap();
+        boot_start(&mut ctx,"./index.js").unwrap();
     }
 }
