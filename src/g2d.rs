@@ -195,8 +195,14 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
     let asset_path = RawJsValue::deserialize_value(args[3], ctx).unwrap().into_string().unwrap();
     let may_asset_id = match asset_type {
         //0 => loader.load_sync::<Value, DefaultBackend>(&asset_path, world).map(|h| h.id()),
-        1 => loader.load_sync::<_, DefaultBackend>(TextuteLoaderInfo::new_only_path(&asset_path), world).map(|h| h.id()),
-        2 => loader.load_sync::<_, DefaultBackend>(SpriteSheetLoaderInfo::new_only_path(&asset_path), world).map(|h| h.id()),
+        1 => {
+            let cfg = parse_image_config(args[4], ctx);
+            loader.load_sync::<_, DefaultBackend>(TextuteLoaderInfo::new(asset_path.as_str(),cfg), world).map(|h| h.id())
+        },
+        2 => {
+            let cfg = parse_image_config(args[4], ctx);
+            loader.load_sync::<_, DefaultBackend>(SpriteSheetLoaderInfo::new(&asset_path,cfg), world).map(|h| h.id())
+        },
         3 => loader.load_sync::<_, DefaultBackend>(FontAssetLoaderInfo::new(&asset_path), world).map(|h| h.id()),
         _ => Err(AssetLoadError::NotFoundLoader),
     };
@@ -212,7 +218,7 @@ pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue,count:
 
 fn parse_image_config(val:q::JSValue,ctx:*mut q::JSContext) -> ImageTextureConfig {
     if let Some(obj) = RawJsValue::deserialize_value(val, ctx).ok().and_then(|v| v.into_object()) {
-        let mut config = ImageTextureConfig::default();
+        let mut config:ImageTextureConfig = ImageTextureConfig::default();
         let js_s_info = obj.get(&String::from("sampler_info")).and_then(|v|v.inner().to_value(ctx).ok()).and_then(|v|v.as_array_int());
         if let Some(s_type) = js_s_info {
             match *s_type.as_slice() {
@@ -226,6 +232,12 @@ fn parse_image_config(val:q::JSValue,ctx:*mut q::JSContext) -> ImageTextureConfi
                 [1,3] => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Border),
                 _ => config.sampler_info = SamplerDesc::new(Filter::Linear, WrapMode::Clamp),
             };
+        }
+        if let Some(is_mips) = obj.get(&String::from("generate_mips")).and_then(|v|v.inner().to_value(ctx).ok()).and_then(|v|v.as_bool()) {
+            config.generate_mips = is_mips;
+        }
+        if let Some(is_mips) = obj.get(&String::from("premultiply_alpha")).and_then(|v|v.inner().to_value(ctx).ok()).and_then(|v|v.as_bool()) {
+            config.premultiply_alpha = is_mips;
         }
         return config;
     }
