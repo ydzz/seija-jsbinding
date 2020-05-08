@@ -11,7 +11,7 @@ function OnStart(world) {
     var loader = g2d.fetchLoader(world);
     var sheet = g2d.loadSync(loader,world,2,"111/material.json",null);
     var root = core.addEventRoot(world);
-    var elSprite = core.mkSprite(world,sheet,"button",{pos:[0,0,0],size:[100,100] },root);
+    var elSprite = core.mkSprite(world,sheet,"button",{pos:[0,0,0],size:[50,50] },root);
     
     var eClick = frp.fetchEvent(world,elSprite,2,false);
   
@@ -21,7 +21,7 @@ function OnStart(world) {
         return v;
     });
     
-    frp.setTransformBehavior(world,elSprite,0,behavior);
+    frp.setTransformBehavior(world,elSprite,{ pos:behavior } );
 }
 
 

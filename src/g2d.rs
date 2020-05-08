@@ -34,7 +34,7 @@ static mut LOADER_REF_COUNT: u32 = 0;
 pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
     SIMPLE2D_CLASS = Some(JSClass::new_full("Simple2d", ctx.c_rt(),Some(simple2d_finalizer),None,None));
     LOADER_CLASS = Some(JSClass::new_full("Loader",ctx.c_rt(),Some(loader_finalizer),None,None));
-    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(event_gc),None)); //delete it
+    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(gc_mark_event),None)); //delete it
     BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),None,None)); //delete it
 
     let g2d_obj = q::JS_NewObject(ctx.c_ctx());
@@ -305,11 +305,12 @@ pub unsafe extern "C" fn c_attach_node_event(ctx: *mut q::JSContext,_: q::JSValu
     let ev_node:&mut EventNode = event_storage.get_mut(entity).unwrap();
     let qctx = QJSContext(ctx);
     ev_node.register(is_capture,ev_typ,move |e,world| {
-        if let Some(js_component) = world.read_storage::<JSEventComponent>().get(e).unwrap().ev_nodes.get(&event_type_id) {
+        let may_js_component = world.read_storage::<JSEventComponent>().get(e).unwrap().ev_nodes.get(&event_type_id).map(|v|*v);
+        if let Some(js_component) = may_js_component {
           let fire_func_name = CString::new("onFire").unwrap();
-          let fire_func = q::JS_GetPropertyStr(qctx.0, *js_component, fire_func_name.as_ptr());
+          let fire_func = q::JS_GetPropertyStr(qctx.0, js_component, fire_func_name.as_ptr());
           let mut js_e_val = JSValue::Int(e.id() as i32).to_c_value(qctx.0);
-          q::JS_Call(qctx.0,fire_func,*js_component,1,&mut js_e_val);
+          q::JS_Call(qctx.0,fire_func,js_component,1,&mut js_e_val);
           AutoDropJSValue::drop_js_value(fire_func,qctx.0);
         }
     });
