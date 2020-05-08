@@ -33,8 +33,8 @@ static mut LOADER_REF_COUNT: u32 = 0;
 pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
     SIMPLE2D_CLASS = Some(JSClass::new_full("Simple2d", ctx.c_rt(),Some(simple2d_finalizer),None,None));
     LOADER_CLASS = Some(JSClass::new_full("Loader",ctx.c_rt(),Some(loader_finalizer),None,None));
-    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(event_gc),None));
-    BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),None,None));
+    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(gc_mark_event),None));
+    BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),Some(gc_mark_behavior),None));
 
     let g2d_obj = q::JS_NewObject(ctx.c_ctx());
     let g2d_attrs = vec![
@@ -116,7 +116,14 @@ unsafe extern "C" fn behavior_finalizer(_rt: *mut q::JSRuntime, val: q::JSValue)
     //println!("ref:{:?}",RawJsValue(val).ref_count());
 }
 
-unsafe extern "C" fn event_gc(_rt: *mut q::JSRuntime, _val: q::JSValue,_mark_func: q::JS_MarkFunc) {
+unsafe extern "C" fn gc_mark_event(_rt: *mut q::JSRuntime, _val: q::JSValue,_mark_func: q::JS_MarkFunc) {
+    println!("event gc mark");
+    //let raw_js = RawJsValue(val);
+    //raw_js.add_ref_count(-1);
+}
+
+unsafe extern "C" fn gc_mark_behavior(_rt: *mut q::JSRuntime, _val: q::JSValue,_mark_func: q::JS_MarkFunc) {
+    println!("behavior gc mark");
     //let raw_js = RawJsValue(val);
     //raw_js.add_ref_count(-1);
 }
@@ -355,6 +362,7 @@ pub unsafe extern "C" fn c_new_event(ctx: *mut q::JSContext,_: q::JSValue,_count
     let event_class: &JSClass = EVENT_CLASS.as_ref().unwrap();
     let mut event_object: JSClassOject = event_class.new_object(ctx);
     event_object.set_opaque(event_ptr);
+    println!("count:{:?}",RawJsValue(event_object.value).ref_count());
     event_object.value()
 }
 

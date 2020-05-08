@@ -41,3 +41,9 @@ export function testSetNextEvent(eClick) {
     core.logEvent(tagE);
     core.logBehavior(bTag);
 }
+
+export function testNewEvent() {
+    var newEvent = g2d.newEvent();
+    var bNumer = g2d.newBehavior(newEvent);
+    g2d.attachBehavior(newEvent,bNumer);
+}

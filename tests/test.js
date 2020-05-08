@@ -10,19 +10,19 @@ var myapp = app.newApp(s2d,{OnStart,ResPath: "../seija/examples/first/res/"});
 
 function OnStart(world) {
     var loader = g2d.fetchLoader(world);
-    var sheet = g2d.loadSync(loader,world,2,"111/material.json");
+    //var sheet = g2d.loadSync(loader,world,2,"111/material.json");
     var root = core.addEventRoot(world);
-    var elSprite = core.mkSprite(world,sheet,"button",{pos:[0,0,0],size:[100,100] },root);
-    var eClick = g2d.getEvent(world,elSprite,2,false);
+    //var elSprite = core.mkSprite(world,sheet,"button",{pos:[0,0,0],size:[100,100] },root);
+    //var eClick = g2d.getEvent(world,elSprite,2,false);
 
-    //testBehavior(eClick);
-     //removeAllChildren
+    event.testNewEvent();
+    /*
    core.chainEvent(eClick,function(e) {
      var idList = g2d.getChildrens(world,root);
      console.error(idList);
      g2d.removeAllChildren(world,root);
      return e;
-   });
+   });*/
 }
 
 function testBehavior(eClick) {
