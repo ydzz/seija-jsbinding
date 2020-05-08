@@ -5,7 +5,6 @@ use qjs_rs::{
 use seija::rendy::texture::{image::{ImageTextureConfig}};
 use seija::assets::{AssetLoadError, Handle,AssetStorage,TextuteLoaderInfo,SpriteSheetLoaderInfo,FontAssetLoaderInfo};
 use seija::common::{Rect2D, Transform,transform::{Parent,component::{ParentHierarchy}}};
-use seija::frp::{Event,Behavior};
 use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
@@ -631,7 +630,7 @@ pub unsafe extern "C" fn set_image_render(ctx: *mut q::JSContext,_: q::JSValue,c
         },
         2 => {
             let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
-            set_image_type(render.info_mut(),arr,&*world);
+            set_image_type(render.info_mut(),arr);
         },
         _ => ()
     };
@@ -658,7 +657,7 @@ pub unsafe extern "C" fn set_sprite_render(ctx: *mut q::JSContext,_: q::JSValue,
             let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
             let typ = arr[0] as i32;
             if typ == 2 {
-                set_image_type(render.info_mut(),arr,&*world);
+                set_image_type(render.info_mut(),arr);
             } else {
                 render.set_slice_type_by_cfg(arr[1] as usize,&(&*world).fetch::<AssetStorage<SpriteSheet>>());
             }
@@ -745,7 +744,7 @@ fn update_mesh_2d(world:&World,entity:Entity) {
 }
 
 
-fn set_image_type(info:&mut ImageGenericInfo,num_arr:Vec<f64>,world:&World) {
+fn set_image_type(info:&mut ImageGenericInfo,num_arr:Vec<f64>) {
         let typ = num_arr[0] as i32;
         match typ {
             0 => info.typ = ImageType::Simple,

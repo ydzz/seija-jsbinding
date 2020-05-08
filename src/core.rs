@@ -5,7 +5,6 @@ use seija::render::{ActiveCamera,Camera};
 use seija::module_bundle::{S2DLoader};
 use std::collections::HashMap;
 use qjs_rs::{JSValue,q,RawJsValue,AutoDropJSValue,JSClass,JSClassOject};
-use seija::frp::{IFRPObject};
 
 pub static mut WORLD_CLASS:Option<JSClass> = None;
 

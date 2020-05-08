@@ -1,3 +1,4 @@
+#![deny(warnings)]
 pub mod core;
 pub mod app;
 pub mod g2d;
