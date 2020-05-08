@@ -10,7 +10,7 @@ use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
     Transparent,
-    components::{ImageRender,SpriteRender,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
+    components::{ImageRender,SpriteRender,ImageGenericInfo,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
     types,
 };
 use seija::rendy::hal::image::{SamplerDesc,Filter,WrapMode};
@@ -19,8 +19,9 @@ use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType};
 use seija::specs::{shred::FetchMut,Entity,World,WorldExt,world::{Builder}};
 use seija::win::{dpi::LogicalSize, WindowBuilder};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::os::raw::c_int;
-use crate::core::{JSFRPNode,QJSValue,QJSContext,QJSWorld};
+use crate::core::{JSFRPNode,QJSValue,QJSContext,QJSWorld,JSEventComponent};
 
 pub static mut SIMPLE2D_CLASS: Option<JSClass> = None;
 pub static mut LOADER_CLASS: Option<JSClass> = None;
@@ -33,27 +34,28 @@ static mut LOADER_REF_COUNT: u32 = 0;
 pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
     SIMPLE2D_CLASS = Some(JSClass::new_full("Simple2d", ctx.c_rt(),Some(simple2d_finalizer),None,None));
     LOADER_CLASS = Some(JSClass::new_full("Loader",ctx.c_rt(),Some(loader_finalizer),None,None));
-    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(gc_mark_event),None));
-    BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),Some(gc_mark_behavior),None));
+    EVENT_CLASS = Some(JSClass::new_full("Event",ctx.c_rt(),Some(event_finalizer),Some(event_gc),None)); //delete it
+    BEHAVIOR_CLASS = Some(JSClass::new_full("Behavior",ctx.c_rt(),Some(behavior_finalizer),None,None)); //delete it
 
     let g2d_obj = q::JS_NewObject(ctx.c_ctx());
     let g2d_attrs = vec![
         JSPropertyItem::func(c_str!("newSimple2d"), Some(c_new_simple2d), 1),
         JSPropertyItem::func(c_str!("fetchLoader"), Some(c_fetch_loader), 1),
         JSPropertyItem::func(c_str!("loadSync"), Some(c_load_sync), 1),
-        JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1),
-        JSPropertyItem::func(c_str!("mergeEvent"),Some(c_merge_event),1),
-        JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1),
-        JSPropertyItem::func(c_str!("newEvent"),Some(c_new_event) ,1),
-        JSPropertyItem::func(c_str!("setNextEvent"),Some(c_set_next_event) ,1),
-        JSPropertyItem::func(c_str!("mapBehavior"),Some(c_map_behavior) ,1),
-        JSPropertyItem::func(c_str!("tagBehavior"),Some(c_tag_behavior) ,1),
+        JSPropertyItem::func(c_str!("attachNodeEvent"),Some(c_attach_node_event) ,1),
+        JSPropertyItem::func(c_str!("getEvent"),Some(c_get_event) ,1), //delete it
+        JSPropertyItem::func(c_str!("mergeEvent"),Some(c_merge_event),1), //delete it
+        JSPropertyItem::func(c_str!("chainEvent"),Some(c_chain_event) ,1), //delete it
+        JSPropertyItem::func(c_str!("newEvent"),Some(c_new_event) ,1), //delete it
+        JSPropertyItem::func(c_str!("setNextEvent"),Some(c_set_next_event) ,1), //delete it
+        JSPropertyItem::func(c_str!("mapBehavior"),Some(c_map_behavior) ,1), //delete it
+        JSPropertyItem::func(c_str!("tagBehavior"),Some(c_tag_behavior) ,1), //delete it
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
-        JSPropertyItem::func(c_str!("newBehavior"),Some(c_new_behavior) ,1),
-        JSPropertyItem::func(c_str!("getBehaviorValue"),Some(c_get_behavior_value), 1),
-        JSPropertyItem::func(c_str!("setBehaviorCallback"),Some(c_set_behavior_callback), 1),
-        JSPropertyItem::func(c_str!("attachBehavior"),Some(c_attach_behavior) ,1),
-        JSPropertyItem::func(c_str!("setBehaviorFoldFunc"),Some(behavior_set_fold_func), 1),
+        JSPropertyItem::func(c_str!("newBehavior"),Some(c_new_behavior) ,1), //delete it
+        JSPropertyItem::func(c_str!("getBehaviorValue"),Some(c_get_behavior_value), 1), //delete it
+        JSPropertyItem::func(c_str!("setBehaviorCallback"),Some(c_set_behavior_callback), 1), //delete it
+        JSPropertyItem::func(c_str!("attachBehavior"),Some(c_attach_behavior) ,1), //delete it
+        JSPropertyItem::func(c_str!("setBehaviorFoldFunc"),Some(behavior_set_fold_func), 1), //delete it
         JSPropertyItem::func(c_str!("getViewPortSize"),Some(c_get_view_port_size), 1),
         JSPropertyItem::func(c_str!("getTextureSize"),Some(c_get_texture_size), 1),
         JSPropertyItem::func(c_str!("getSpriteRectInfo"),Some(c_get_sprite_rect_info), 1),
@@ -72,11 +74,17 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("addTextRender"),Some(c_add_text_render), 1),
         JSPropertyItem::func(c_str!("addTransparent"),Some(c_add_transparent), 1),
         //component attr
-        JSPropertyItem::func(c_str!("setTransformBehavior"),Some(set_transform_behavior),1),
-        JSPropertyItem::func(c_str!("setRect2dBehavior"),Some(set_rect2d_behavior),1),
-        JSPropertyItem::func(c_str!("setImageRenderBehavior"),Some(set_image_render_behavior),1),
-        JSPropertyItem::func(c_str!("setSpriteRenderBehavior"),Some(set_sprite_render_behavior),1),
-        JSPropertyItem::func(c_str!("setTextRenderBehavior"),Some(set_text_render_behavior),1)
+        JSPropertyItem::func(c_str!("setTransformBehavior"),Some(set_transform_behavior),1), //delete it
+        JSPropertyItem::func(c_str!("setRect2dBehavior"),Some(set_rect2d_behavior),1), //delete it
+        JSPropertyItem::func(c_str!("setImageRenderBehavior"),Some(set_image_render_behavior),1), //delete it
+        JSPropertyItem::func(c_str!("setSpriteRenderBehavior"),Some(set_sprite_render_behavior),1), //delete it
+        JSPropertyItem::func(c_str!("setTextRenderBehavior"),Some(set_text_render_behavior),1), //delete it
+
+        JSPropertyItem::func(c_str!("setTransform"),Some(set_transform),1),
+        JSPropertyItem::func(c_str!("setRect2d"),Some(set_rect2d),1),
+        JSPropertyItem::func(c_str!("setImageRender"),Some(set_image_render),1),
+        JSPropertyItem::func(c_str!("setSpriteRender"),Some(set_sprite_render),1),
+        JSPropertyItem::func(c_str!("setTextRender"),Some(set_text_render),1),
     ];
     ctx.set_property_function_list(g2d_obj, &g2d_attrs);
     q::JS_SetModuleExport(ctx.c_ctx(), m, c_str!("g2d").as_ptr(), g2d_obj);
@@ -266,6 +274,46 @@ pub unsafe extern "C" fn c_merge_event(ctx: *mut q::JSContext,_: q::JSValue,coun
        event.set_next_event(new_event_ptr);
     }
     event_object.value()
+}
+
+pub unsafe extern "C" fn c_attach_node_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let eid = RawJsValue(args[1]).to_value(ctx).unwrap().as_int().unwrap();
+    let entity = world.entities().entity(eid as u32);
+    let event_type_id = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap() as u32;
+    
+    let mut js_component_storage = world.write_storage::<JSEventComponent>();
+    let mut event_storage = world.write_storage::<EventNode>();
+    if !js_component_storage.contains(entity) {
+        let mut js_component = JSEventComponent::default();
+        js_component.set_ctx(ctx);
+        let val = q::JS_DupValue(args[4]);
+        js_component.insert_node(event_type_id,val);
+        js_component_storage.insert(entity,js_component).unwrap();
+    } else {
+        let js_component = js_component_storage.get_mut(entity).unwrap();
+        let val = q::JS_DupValue(args[4]);
+        js_component.insert_node(event_type_id,val);
+    }
+    if !event_storage.contains(entity) {
+        let ev = EventNode::default();
+        event_storage.insert(entity,ev).unwrap();
+    };
+    let is_capture = RawJsValue(args[3]).to_value(ctx).unwrap().as_bool().unwrap();
+    let ev_typ = GameEventType::from(event_type_id).unwrap_or(GameEventType::TouchStart);
+    let ev_node:&mut EventNode = event_storage.get_mut(entity).unwrap();
+    let qctx = QJSContext(ctx);
+    ev_node.register(is_capture,ev_typ,move |e,world| {
+        if let Some(js_component) = world.read_storage::<JSEventComponent>().get(e).unwrap().ev_nodes.get(&event_type_id) {
+          let fire_func_name = CString::new("onFire").unwrap();
+          let fire_func = q::JS_GetPropertyStr(qctx.0, *js_component, fire_func_name.as_ptr());
+          let mut js_e_val = JSValue::Int(e.id() as i32).to_c_value(qctx.0);
+          q::JS_Call(qctx.0,fire_func,*js_component,1,&mut js_e_val);
+          AutoDropJSValue::drop_js_value(fire_func,qctx.0);
+        }
+    });
+    RawJsValue::val_null()
 }
 
 pub unsafe extern "C" fn c_get_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
@@ -734,6 +782,31 @@ pub unsafe extern "C" fn c_get_sprite_rect_info(ctx: *mut q::JSContext,_: q::JSV
     RawJsValue::val_null()
 }
 
+pub unsafe extern "C" fn set_transform(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (world,entity,attr_type,value) = get_w_e_t_v(argv,count,ctx);
+    let mut trans_storage = (&*world).write_storage::<Transform>();
+    let trans:&mut Transform = trans_storage.get_mut(entity).unwrap();
+    match attr_type {
+        0 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            trans.set_position(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
+        },
+        1 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            trans.set_scale(Vector3::new(arr[0] as f32,arr[1] as f32,arr[2] as f32));
+        },
+        2 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            trans.set_rotation_euler(arr[0] as f32,arr[1] as f32,arr[2] as f32);
+        },
+        _ => ()
+    };
+    update_mesh_2d(&*world, entity);
+    RawJsValue::val_null()
+}
+
+
+
 pub unsafe extern "C" fn set_transform_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
     if let Some(b_js_pos)  =  b_map.get(&String::from("pos")) {
@@ -768,6 +841,27 @@ pub unsafe extern "C" fn set_transform_behavior(ctx: *mut q::JSContext,_: q::JSV
         })
     }
    
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_rect2d(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (world,entity,attr_type,value) = get_w_e_t_v(argv,count,ctx);
+    let mut rect_storage = (&*world).write_storage::<Rect2D>();
+    let rect:&mut Rect2D = rect_storage.get_mut(entity).unwrap();
+    match attr_type {
+        0 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            rect.width  = arr[0] as f32;
+            rect.height = arr[1] as f32;
+        },
+        1 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            rect.anchor[0] = arr[0] as f32;
+            rect.anchor[1] = arr[1] as f32;
+        },
+        _ => ()
+    };
+    update_mesh_2d(&*world, entity);
     RawJsValue::val_null()
 }
 
@@ -809,6 +903,29 @@ pub unsafe extern "C" fn set_rect2d_behavior(ctx: *mut q::JSContext,_: q::JSValu
     RawJsValue::val_null()
 }
 
+pub unsafe extern "C" fn set_image_render(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (world,entity,attr_type,value) = get_w_e_t_v(argv,count,ctx);
+    let mut render_storage = (&*world).write_storage::<ImageRender>();
+    let render:&mut ImageRender = render_storage.get_mut(entity).unwrap();
+    match attr_type {
+        0 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            render.set_color(arr[0] as f32, arr[1] as f32, arr[2] as f32, arr[3] as f32); 
+        },
+        1 => {
+            let tex_id = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap();
+            render.set_texture(Handle::new(tex_id as u32));
+        },
+        2 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            set_image_type(render.info_mut(),arr,&*world);
+        },
+        _ => ()
+    };
+    update_mesh_2d(&*world, entity);
+    RawJsValue::val_null()
+}
+
 pub unsafe extern "C" fn set_image_render_behavior(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
     let (qworld,entity,b_map,q_ctx) = get_w_e_m_q(argv,count,ctx);
     if let Some(b_js_color)  =  b_map.get(&String::from("color")) {
@@ -826,6 +943,43 @@ pub unsafe extern "C" fn set_image_render_behavior(ctx: *mut q::JSContext,_: q::
             update_color(val);
         })
     }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn set_sprite_render(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (world,entity,attr_type,value) = get_w_e_t_v(argv,count,ctx);
+    let mut render_storage = (&*world).write_storage::<SpriteRender>();
+    let render:&mut SpriteRender = render_storage.get_mut(entity).unwrap();
+    match attr_type {
+        0 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            render.set_color(arr[0] as f32, arr[1] as f32, arr[2] as f32, arr[3] as f32); 
+        },
+        1 => {
+            let spr_name = RawJsValue(value).to_value(ctx).unwrap().into_string().unwrap();
+            render.set_sprite_name(spr_name);
+        },
+        2 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            let typ = arr[0] as i32;
+            if typ == 2 {
+                set_image_type(render.info_mut(),arr,&*world);
+            } else {
+                render.set_slice_type_by_cfg(arr[1] as usize,&(&*world).fetch::<AssetStorage<SpriteSheet>>());
+            }
+            
+        },
+        3 => {
+            let fill_value = RawJsValue(value).to_value(ctx).unwrap().as_number().unwrap();
+            render.set_fill_value(fill_value as f32);
+        },
+        4 => {
+            let sheet = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap();
+            render.sprite_sheet = Handle::new(sheet as u32);
+        },
+        _ => ()
+    };
+    update_mesh_2d(&*world, entity);
     RawJsValue::val_null()
 }
 
@@ -862,6 +1016,45 @@ pub unsafe extern "C" fn set_sprite_render_behavior(ctx: *mut q::JSContext,_: q:
             update_color(val);
         })
     }
+    RawJsValue::val_null()
+}
+
+
+pub unsafe extern "C" fn set_text_render(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let (world,entity,attr_type,value) = get_w_e_t_v(argv,count,ctx);
+    let mut text_storage = (&*world).write_storage::<TextRender>();
+    let render:&mut TextRender = text_storage.get_mut(entity).unwrap();
+    match attr_type {
+        0 => {
+            let text = RawJsValue(value).to_value(ctx).unwrap().into_string().unwrap();
+            render.set_text(text.as_str());
+        },
+        1 => {
+            let font_size = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap();
+            render.set_font_size(font_size);
+        },
+        2 => {
+            let arr = RawJsValue(value).to_value(ctx).unwrap().as_array_number().unwrap();
+            render.set_color(arr[0] as f32, arr[1] as f32, arr[2] as f32, arr[3] as f32);
+        },
+        3 => {
+            let anchor = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap() as u32;
+            render.set_anchor(anchor.into());
+        },
+        4 => {
+            let line_mode = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap() as u32;
+            if line_mode == 0 {
+                render.set_line_mode(LineMode::Single);
+            } else {
+                render.set_line_mode(LineMode::Wrap);
+            }
+        },
+        5 => {
+            let font_id = RawJsValue(value).to_value(ctx).unwrap().as_int().unwrap() as u32;
+            render.font = Handle::new(font_id);
+        }
+        _ => ()
+    };
     RawJsValue::val_null()
 }
 
@@ -949,6 +1142,15 @@ pub unsafe extern "C" fn set_text_render_behavior(ctx: *mut q::JSContext,_: q::J
 }
 
 /*#region tools*/
+unsafe fn get_w_e_t_v<'a>(argv: *mut q::JSValue,count:i32,ctx:*mut q::JSContext) -> (*mut World,Entity,i32,q::JSValue) {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: *mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(&mut *world,args[1],ctx).unwrap();
+    let attr_type = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap();
+    
+    (world,entity,attr_type,args[3])
+}
+
 unsafe fn get_w_e_m_q<'a>(argv: *mut q::JSValue,count:i32,ctx:*mut q::JSContext) -> (QJSWorld,Entity,HashMap<String,AutoDropJSValue>,QJSContext) {
     let args = std::slice::from_raw_parts(argv, count as usize);
     let world: *mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
@@ -977,5 +1179,24 @@ unsafe fn event_ptr(val:q::JSValue) -> &'static mut Event<QJSValue> {
     std::mem::transmute(q::JS_GetOpaque(val,EVENT_CLASS.as_ref().unwrap().class_id()))
 }
 
+fn set_image_type(info:&mut ImageGenericInfo,num_arr:Vec<f64>,world:&World) {
+        let typ = num_arr[0] as i32;
+        match typ {
+            0 => info.typ = ImageType::Simple,
+            1 => info.typ = ImageType::Sliced(num_arr[1] as f32,num_arr[2] as f32,num_arr[3] as f32,num_arr[4] as f32),
+            3 => {
+                let ftyp = num_arr[1] as i32;
+                match ftyp {
+                    0 => info.typ = ImageType::Filled(ImageFilledType::HorizontalLeft,num_arr[1] as f32),
+                    1 => info.typ = ImageType::Filled(ImageFilledType::HorizontalRight,num_arr[2] as f32),
+                    2 => info.typ = ImageType::Filled(ImageFilledType::VerticalTop,num_arr[3] as f32),
+                    3 => info.typ = ImageType::Filled(ImageFilledType::VerticalBottom,num_arr[4] as f32),
+                    _ => ()
+                }
+            },
+            4 => info.typ = ImageType::Tiled,
+            _ => ()
+        }
+}
 
 /*#endregion newImage*/

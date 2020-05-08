@@ -18,6 +18,6 @@ pub fn loader_export(ctx: *mut q::JSContext, m: *mut q::JSModuleDef) {
     };
 }
 
-pub unsafe extern "C" fn c_load_sync(ctx: *mut q::JSContext,_: q::JSValue, count:c_int, argv: *mut q::JSValue) -> q::JSValue {
+pub unsafe extern "C" fn c_load_sync(_: *mut q::JSContext,_: q::JSValue, _:c_int, _: *mut q::JSValue) -> q::JSValue {
     RawJsValue::val_null()
 }

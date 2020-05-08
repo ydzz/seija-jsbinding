@@ -1,7 +1,6 @@
 use qjs_rs::{q, JSContext, JSPropertyItem,RawJsValue,JSClass};
 use std::os::raw::{c_int};
 use seija::app::{AppBuilder,App};
-use seija::win::{dpi::{LogicalSize}};
 use seija::module_bundle::{Simple2d};
 use seija::core::{LimitSetting};
 use crate::g2d::{SIMPLE2D_CLASS};

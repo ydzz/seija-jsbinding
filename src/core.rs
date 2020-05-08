@@ -3,8 +3,8 @@ use seija::specs::{World,WorldExt,Builder,Component,DenseVecStorage};
 use seija::common::{Transform};
 use seija::render::{ActiveCamera,Camera};
 use seija::module_bundle::{S2DLoader};
-use std::sync::{Arc};
 use std::ops::{Deref,DerefMut};
+use std::collections::HashMap;
 
 use qjs_rs::{JSValue,q,RawJsValue,AutoDropJSValue,JSClass,JSClassOject};
 use seija::frp::{IFRPObject,FRPNode};
@@ -53,6 +53,7 @@ impl JSGame {
 impl IGame for JSGame {
     fn start(&mut self,world:&mut World) {
         world.register::<JSFRPNode>();
+        world.register::<JSEventComponent>();
         self.world_object.set_opaque::<World>(world as *mut World);
         let camera_transform = Transform::default();
         let entity = world.create_entity().with(camera_transform).with(Camera::standard_2d(1024f32, 768f32)).build();
@@ -85,7 +86,40 @@ impl IGame for JSGame {
         AutoDropJSValue::drop_js_value(self.world_object.value(), self.ctx);
     }
 }
+#[derive(Default)]
+pub struct JSEventComponent {
+    pub ev_nodes:HashMap<u32,q::JSValue>,
+    ctx:Option<QJSContext>
+}
 
+impl Drop for JSEventComponent {
+    fn drop(&mut self) {
+        for (_,js_val) in self.ev_nodes.iter() {
+            AutoDropJSValue::drop_js_value(*js_val, self.ctx.as_ref().unwrap().0);
+        }        
+    }
+}
+
+impl JSEventComponent {
+    pub fn insert_node(&mut self,typ_id:u32,value:q::JSValue) {
+        self.ev_nodes.insert(typ_id,value);
+    }
+
+    pub fn set_ctx(&mut self,ctx:*mut q::JSContext) {
+        self.ctx = Some(QJSContext(ctx));
+    }
+    
+    pub fn ctx(&self) -> Option<&QJSContext> {
+        self.ctx.as_ref()
+    }
+}
+
+unsafe impl Send for JSEventComponent {}
+unsafe impl Sync for JSEventComponent {}
+
+impl Component for JSEventComponent {
+    type Storage = DenseVecStorage<JSEventComponent>;
+}
 
 #[derive(Default)]
 pub struct JSFRPNode {
