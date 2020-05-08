@@ -3,11 +3,9 @@ use seija::specs::{World,WorldExt,Builder,Component,DenseVecStorage};
 use seija::common::{Transform};
 use seija::render::{ActiveCamera,Camera};
 use seija::module_bundle::{S2DLoader};
-use std::ops::{Deref,DerefMut};
 use std::collections::HashMap;
-
 use qjs_rs::{JSValue,q,RawJsValue,AutoDropJSValue,JSClass,JSClassOject};
-use seija::frp::{IFRPObject,FRPNode};
+use seija::frp::{IFRPObject};
 
 pub static mut WORLD_CLASS:Option<JSClass> = None;
 
@@ -52,7 +50,6 @@ impl JSGame {
 
 impl IGame for JSGame {
     fn start(&mut self,world:&mut World) {
-        world.register::<JSFRPNode>();
         world.register::<JSEventComponent>();
         self.world_object.set_opaque::<World>(world as *mut World);
         let camera_transform = Transform::default();
@@ -121,113 +118,8 @@ impl Component for JSEventComponent {
     type Storage = DenseVecStorage<JSEventComponent>;
 }
 
-#[derive(Default)]
-pub struct JSFRPNode {
-    node:FRPNode<QJSValue>,
-    js_objects:Vec<JSClassOject>,
-    ctx:Option<QJSContext>
-}
-
-impl JSFRPNode {
-    pub fn push_js_object(&mut self,js_object:JSClassOject) {
-        RawJsValue(js_object.value()).add_ref_count(1);
-        self.js_objects.push(js_object);
-    }
-
-    pub fn set_ctx(&mut self,ctx:*mut q::JSContext) {
-        self.ctx = Some(QJSContext(ctx));
-    }
-}
-
-impl Drop for JSFRPNode {
-    fn drop(&mut self) {
-       //dbg!("Drop JSFRPNode");
-       for object in self.js_objects.iter() {
-           AutoDropJSValue::drop_js_value(object.value(), self.ctx.as_ref().unwrap().0);
-       }
-    }
-}
-
-impl Deref for JSFRPNode {
-    type Target = FRPNode<QJSValue>;
-    fn deref(&self) -> &Self::Target {
-        &self.node
-    }
-}
-
-impl DerefMut for JSFRPNode {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.node
-    }
-}
-
-impl Component for JSFRPNode {
-    type Storage = DenseVecStorage<JSFRPNode>;
-}
-
-unsafe impl Send for JSFRPNode {}
-unsafe impl Sync for JSFRPNode {}
-
-
 pub struct QJSContext(pub *mut q::JSContext);
 unsafe impl Send for QJSContext {}
 unsafe impl Sync for QJSContext {}
 
-#[derive(Copy,Clone)]
-pub struct QJSWorld(pub *mut World);
-unsafe impl Send for QJSWorld {}
-unsafe impl Sync for QJSWorld {}
 
-
-#[derive(Copy,Clone)]
-pub struct QJSValue(pub q::JSValue);
-
-impl QJSValue {
-    pub fn new(val:q::JSValue) -> Self {
-        QJSValue(val)
-    }
-}
-
-impl Into<q::JSValue> for QJSValue {
-    fn into(self) -> q::JSValue {
-        self.0
-    }
-}
-
-impl From<q::JSValue> for QJSValue {
-    fn from(val:q::JSValue) -> Self {
-        QJSValue(val)
-    }
-}
-
-impl IFRPObject for QJSValue {
-    type Context = *mut q::JSContext;
-    fn call(&self,val:QJSValue,ctx: *mut q::JSContext) -> QJSValue {
-        unsafe {
-            let mut val2 = val.0;
-            q::JS_Call(ctx,self.0,RawJsValue::val_null(),1,&mut val2).into()
-        } 
-    }
-
-    fn fold_call(&self,old_val: Self, val: Self, ctx: Self::Context) -> QJSValue {
-        unsafe {
-          
-            let mut val_arr = [old_val.0,val.0];
-           
-            q::JS_Call(ctx,self.0,RawJsValue::val_null(),2,val_arr.as_mut_ptr()).into()
-        }
-    }
-
-    fn drop_object(&self,ctx:Self::Context) {
-        AutoDropJSValue::drop_js_value(self.0, ctx)
-    }
-
-    fn debug(&self,_:Self::Context) {
-        dbg!(self.0.tag);
-        dbg!(RawJsValue(self.0).ref_count());
-    }
-
-    fn add_ref_count(&self,count:i32) {
-        RawJsValue(self.0).add_ref_count(count);
-    }
-}
