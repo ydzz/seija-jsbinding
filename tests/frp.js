@@ -33,6 +33,18 @@ export function fetchEvent(world,entity,eventType,isCapture) {
     return newEvent;
 }
 
+export function fetchTimeEvent(world,entity,updateType,updateNumber) {
+    var newEvent = defaultEvent();
+    g2d.attachTimeEvent(world,entity,updateType,updateNumber,newEvent);
+    return newEvent;
+}
+
+export function fetchGlobalEvent(world,entity,evType) {
+    var newEvent = defaultEvent();
+    g2d.attachGlobalEvent(world,entity,evType,newEvent);
+    return newEvent;
+}
+
 export function chainEvent(ev,fn) {
     var newEvent = defaultEvent();
     newEvent.func = fn;

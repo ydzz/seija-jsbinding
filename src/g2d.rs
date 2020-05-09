@@ -4,7 +4,7 @@ use qjs_rs::{
 };
 use seija::rendy::texture::{image::{ImageTextureConfig}};
 use seija::assets::{AssetLoadError, Handle,AssetStorage,TextuteLoaderInfo,SpriteSheetLoaderInfo,FontAssetLoaderInfo};
-use seija::common::{Rect2D, Transform,transform::{Parent,component::{ParentHierarchy}}};
+use seija::common::{Rect2D,Update,UpdateDesc,Transform,transform::{Parent,component::{ParentHierarchy}}};
 use seija::math::Vector3;
 use seija::module_bundle::{DefaultBackend, S2DLoader, Simple2d};
 use seija::render::{
@@ -14,13 +14,13 @@ use seija::render::{
 };
 use seija::rendy::hal::image::{SamplerDesc,Filter,WrapMode};
 use seija::window::{ViewPortSize};
-use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType};
+use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType,global::{GlobalEventNode}};
 use seija::specs::{shred::FetchMut,Entity,World,WorldExt,world::{Builder}};
 use seija::win::{dpi::LogicalSize, WindowBuilder};
 
 use std::ffi::CString;
 use std::os::raw::c_int;
-use crate::core::{QJSContext,JSEventComponent};
+use crate::core::{QJSContext,JSEventComponent,JSEventCallback};
 
 pub static mut SIMPLE2D_CLASS: Option<JSClass> = None;
 pub static mut LOADER_CLASS: Option<JSClass> = None;
@@ -39,6 +39,8 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("fetchLoader"), Some(c_fetch_loader), 1),
         JSPropertyItem::func(c_str!("loadSync"), Some(c_load_sync), 1),
         JSPropertyItem::func(c_str!("attachNodeEvent"),Some(c_attach_node_event) ,1),
+        JSPropertyItem::func(c_str!("attachTimeEvent"),Some(c_attach_time_event) ,1),
+        JSPropertyItem::func(c_str!("attachGlobalEvent"),Some(c_attach_global_event) ,1),
         JSPropertyItem::func(c_str!("refCount"),Some(c_ref_count) ,1),
         JSPropertyItem::func(c_str!("getViewPortSize"),Some(c_get_view_port_size), 1),
         JSPropertyItem::func(c_str!("getTextureSize"),Some(c_get_texture_size), 1),
@@ -255,6 +257,57 @@ pub unsafe extern "C" fn c_attach_node_event(ctx: *mut q::JSContext,_: q::JSValu
     RawJsValue::val_null()
 }
 
+pub unsafe extern "C" fn c_attach_time_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let eid = RawJsValue(args[1]).to_value(ctx).unwrap().as_int().unwrap();
+    let entity = world.entities().entity(eid as u32);
+    let update_type = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap() as u32;
+    let mut update_desc:UpdateDesc = if update_type == 0 {
+        UpdateDesc::from_frame(RawJsValue(args[3]).to_value(ctx).unwrap().as_int().unwrap() as u32)
+    } else {
+        UpdateDesc::from_time(RawJsValue(args[3]).to_value(ctx).unwrap().as_number().unwrap() as f32)
+    };
+    let val = q::JS_DupValue(args[4]);
+    let js_call_back = JSEventCallback {
+        val,
+        ctx:Some(QJSContext(ctx))   
+    };
+    update_desc.set_call(Box::new(js_call_back));
+
+    let mut update_storage = world.write_storage::<Update>();
+    if let Some(update) = update_storage.get_mut(entity) {
+       update.insert(update_desc);
+    } else {
+        let mut update = Update::default();
+        update.insert(update_desc);
+        update_storage.insert(entity, update).unwrap();
+    }
+    RawJsValue::val_null()
+}
+
+pub unsafe extern "C" fn c_attach_global_event(ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let eid = RawJsValue(args[1]).to_value(ctx).unwrap().as_int().unwrap();
+    let entity = world.entities().entity(eid as u32);
+    let ev_type = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap() as u32;
+    let mut global_storage = world.write_storage::<GlobalEventNode>();
+
+    let val = q::JS_DupValue(args[3]);
+    let js_call_back = JSEventCallback {
+        val,
+        ctx:Some(QJSContext(ctx))   
+    };
+    if let Some(global) = global_storage.get_mut(entity) {
+        global.insert(GameEventType::from(ev_type).unwrap(),Box::new(js_call_back));
+    } else {
+        let mut global = GlobalEventNode::default();
+        global.insert(GameEventType::from(ev_type).unwrap(),Box::new(js_call_back));
+        global_storage.insert(entity, global).unwrap();
+    }
+    RawJsValue::val_null()
+}
 
 
 pub unsafe extern "C" fn c_new_entity(_ctx: *mut q::JSContext,_: q::JSValue,count: c_int,argv: *mut q::JSValue) -> q::JSValue {

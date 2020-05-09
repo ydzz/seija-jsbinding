@@ -1,9 +1,11 @@
 use seija::core::IGame;
 use seija::specs::{World,WorldExt,Builder,Component,DenseVecStorage};
-use seija::common::{Transform};
+use seija::common::{Transform,UpdateCallBack};
 use seija::render::{ActiveCamera,Camera};
 use seija::module_bundle::{S2DLoader};
+use seija::event::{GameEventCallBack,GameEvent};
 use std::collections::HashMap;
+use std::ffi::CString;
 use qjs_rs::{JSValue,q,RawJsValue,AutoDropJSValue,JSClass,JSClassOject};
 
 pub static mut WORLD_CLASS:Option<JSClass> = None;
@@ -122,3 +124,50 @@ unsafe impl Send for QJSContext {}
 unsafe impl Sync for QJSContext {}
 
 
+pub struct JSEventCallback {
+    pub val:q::JSValue,
+    pub ctx:Option<QJSContext>
+}
+
+impl UpdateCallBack for JSEventCallback {
+    fn run(&self) {
+        unsafe {
+            let ctx = self.ctx.as_ref().unwrap();
+            let fire_func_name = CString::new("onFire").unwrap();
+            let fire_func = q::JS_GetPropertyStr(ctx.0, self.val, fire_func_name.as_ptr());
+            q::JS_Call(ctx.0,fire_func,self.val,0,std::ptr::null_mut());
+            AutoDropJSValue::drop_js_value(fire_func,ctx.0);
+        }
+    }
+}
+
+impl Drop for JSEventCallback {
+    fn drop(&mut self) {
+        AutoDropJSValue::drop_js_value(self.val, self.ctx.as_ref().unwrap().0);
+    }
+}
+
+unsafe impl Send for JSEventCallback {}
+unsafe impl Sync for JSEventCallback {}
+
+impl GameEventCallBack for JSEventCallback {
+    fn run(&self,ev:&GameEvent) {
+        unsafe {
+            let js_val = {
+                match ev {
+                    GameEvent::KeyBoard(code,is_press) => {
+                        JSValue::Array(vec![JSValue::Int(*code as i32),JSValue::Bool(*is_press)])
+                    },
+                    _ => JSValue::Null
+                } 
+            };
+            let ctx = self.ctx.as_ref().unwrap();
+            let fire_func_name = CString::new("onFire").unwrap();
+            let fire_func = q::JS_GetPropertyStr(ctx.0, self.val, fire_func_name.as_ptr());
+            let val_ptr = &mut js_val.to_c_value(ctx.0);
+            q::JS_Call(ctx.0,fire_func,self.val,1,val_ptr);
+            AutoDropJSValue::drop_js_value(fire_func,ctx.0);
+            AutoDropJSValue::drop_js_value(*val_ptr,ctx.0);
+        }
+    }
+}

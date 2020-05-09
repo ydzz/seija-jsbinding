@@ -13,15 +13,12 @@ function OnStart(world) {
     var root = core.addEventRoot(world);
     var elSprite = core.mkSprite(world,sheet,"button",{pos:[0,0,0],size:[50,50] },root);
     
-    var eClick = frp.fetchEvent(world,elSprite,2,false);
-  
-    
-    var behavior = frp.foldBehavior([0,0,0],eClick,function(v,ev){
-        v[0] += 1;
-        return v;
+    var eKey = frp.fetchGlobalEvent(world,elSprite,6);
+    frp.chainEvent(eKey,function(val) {
+        var e = g2d.newEntity(world);
+        console.error(e);
+        return val;
     });
-    
-    frp.setTransformBehavior(world,elSprite,{ pos:behavior } );
 }
 
 
