@@ -99,6 +99,7 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
 
     let mut may_width = None;
     let mut may_height = None;
+    let mut may_title = None;
     let attr_dic = RawJsValue::deserialize_value(args[0], ctx).unwrap();
     
     let js_win_attr = attr_dic.as_object().and_then(|m| m.get(&String::from("window")));
@@ -112,6 +113,10 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
         if let Some(Some(js_height)) = may_map.map(|m| m.get(&String::from("height"))) {
             let js_num = RawJsValue::deserialize_value(js_height.inner().0, ctx).unwrap();
             may_height = js_num.as_number();
+        }
+        if let Some(Some(title)) = may_map.map(|m| m.get(&String::from("title"))) {
+            let js_str = RawJsValue::deserialize_value(title.inner().0, ctx).unwrap();
+            may_title = js_str.into_string();
         }
         if let Some(Some(js_bg_color)) = may_map.map(|m| m.get(&String::from("bgColor"))) {
             let color_arr = RawJsValue::deserialize_value(js_bg_color.inner().0, ctx).unwrap();
@@ -128,7 +133,9 @@ pub unsafe extern "C" fn c_new_simple2d(ctx: *mut q::JSContext,_: q::JSValue,cou
     let width = may_width.unwrap_or(640f64);
     let height = may_height.unwrap_or(480f64);
 
+    let title_str = may_title.unwrap_or(String::from("window"));
     s2d.with_window(move |wb: &mut WindowBuilder| {
+       wb.window.title = title_str.clone();
         wb.window.dimensions = Some(LogicalSize {
             width: width,
             height: height,

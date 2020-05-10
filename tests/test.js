@@ -15,8 +15,7 @@ function OnStart(world) {
     
     var eKey = frp.fetchGlobalEvent(world,elSprite,6);
     frp.chainEvent(eKey,function(val) {
-        var e = g2d.newEntity(world);
-        console.error(e);
+       
         return val;
     });
 }
