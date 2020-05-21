@@ -1,6 +1,7 @@
 use seija::core::IGame;
 use seija::specs::{World,WorldExt,Builder,Component,DenseVecStorage};
 use seija::common::{Transform,UpdateCallBack};
+use seija::window::{ViewPortSize};
 use seija::render::{ActiveCamera,Camera};
 use seija::module_bundle::{S2DLoader};
 use seija::event::{GameEventCallBack,GameEvent};
@@ -54,7 +55,11 @@ impl IGame for JSGame {
         world.register::<JSEventComponent>();
         self.world_object.set_opaque::<World>(world as *mut World);
         let camera_transform = Transform::default();
-        let entity = world.create_entity().with(camera_transform).with(Camera::standard_2d(1024f32, 768f32)).build();
+        let (w,h) = {
+            let view_port = world.fetch::<ViewPortSize>();
+            (view_port.width() as f32,view_port.height() as f32)
+        };
+        let entity = world.create_entity().with(camera_transform).with(Camera::standard_2d(w, h)).build();
         world.insert(ActiveCamera {entity : Some(entity) });
         world.fetch::<S2DLoader>().env().set_fs_root(self.res_path.as_str());
         if let Some(ref fn_val) = self.on_start {

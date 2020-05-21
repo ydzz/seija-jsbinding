@@ -12,6 +12,7 @@ use seija::render::{
     components::{ImageRender,SpriteRender,ImageGenericInfo,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
     types,
 };
+use seija::s2d::layout::{ScreenScaler,BaseLayout};
 use seija::rendy::hal::image::{SamplerDesc,Filter,WrapMode};
 use seija::window::{ViewPortSize};
 use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType,global::{GlobalEventNode}};
@@ -59,6 +60,8 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("addSpriteRender"),Some(c_add_sprite_render), 1),
         JSPropertyItem::func(c_str!("addTextRender"),Some(c_add_text_render), 1),
         JSPropertyItem::func(c_str!("addTransparent"),Some(c_add_transparent), 1),
+        JSPropertyItem::func(c_str!("addScreenScaler"), Some(c_add_screen_scaler), 1),
+        JSPropertyItem::func(c_str!("addBaseLayout"), Some(c_add_base_layout), 1),
         //component attr
         JSPropertyItem::func(c_str!("setTransform"),Some(set_transform),1),
         JSPropertyItem::func(c_str!("setRect2d"),Some(set_rect2d),1),
@@ -568,6 +571,51 @@ pub unsafe extern "C" fn c_add_transparent(ctx: *mut q::JSContext,_: q::JSValue,
         return RawJsValue::val_bool(false)
     }
     storage.insert(entity,Transparent).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+pub unsafe extern "C" fn c_add_screen_scaler(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let scale_type = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap();
+    let number = RawJsValue(args[3]).to_value(ctx).unwrap().as_number().unwrap();
+    let screen_scaler = {
+        if scale_type == 0 {
+            ScreenScaler::with_scale_width(number as f32)
+        } else {
+            ScreenScaler::with_scale_height(number as f32)
+        }
+    };
+    let mut storage = world.write_storage::<ScreenScaler>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,screen_scaler).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+
+pub unsafe extern "C" fn c_add_base_layout(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let horizontal_align = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap();
+    let vertical_align = RawJsValue(args[3]).to_value(ctx).unwrap().as_int().unwrap();
+    let mut layout = BaseLayout::default();
+    layout.horizontal_align = horizontal_align.into();
+    layout.vertical_align = vertical_align.into();
+    if let Some(margin_arr) = RawJsValue(args[4]).to_value(ctx).unwrap().as_array_number() {
+        layout.margin.set(margin_arr[0] as f32, margin_arr[1] as f32, margin_arr[2] as f32, margin_arr[3] as f32);
+    }
+    if let Some(padding_arr) = RawJsValue(args[5]).to_value(ctx).unwrap().as_array_number() {
+        layout.padding.set(padding_arr[0] as f32, padding_arr[1] as f32, padding_arr[2] as f32, padding_arr[3] as f32);
+    }
+    let mut storage = world.write_storage::<BaseLayout>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,layout).unwrap();
     RawJsValue::val_bool(true)
 }
 
