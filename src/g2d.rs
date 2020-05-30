@@ -12,7 +12,7 @@ use seija::render::{
     components::{ImageRender,SpriteRender,ImageGenericInfo,LineMode,TextRender,SpriteSheet,ImageType,Mesh2D,ImageFilledType,Sprite},
     types,
 };
-use seija::s2d::layout::{ScreenScaler,BaseLayout};
+use seija::s2d::layout::{ScreenScaler,BaseLayout,StackPanel,Orientation};
 use seija::rendy::hal::image::{SamplerDesc,Filter,WrapMode};
 use seija::window::{ViewPortSize};
 use seija::event::{cb_event::{CABEventRoot},EventNode,GameEventType,global::{GlobalEventNode}};
@@ -62,6 +62,7 @@ pub unsafe fn g2d_init(ctx: &mut JSContext, m: *mut q::JSModuleDef) {
         JSPropertyItem::func(c_str!("addTransparent"),Some(c_add_transparent), 1),
         JSPropertyItem::func(c_str!("addScreenScaler"), Some(c_add_screen_scaler), 1),
         JSPropertyItem::func(c_str!("addBaseLayout"), Some(c_add_base_layout), 1),
+        JSPropertyItem::func(c_str!("addStackPanel"), Some(c_add_stack_panel), 1),
         //component attr
         JSPropertyItem::func(c_str!("setTransform"),Some(set_transform),1),
         JSPropertyItem::func(c_str!("setRect2d"),Some(set_rect2d),1),
@@ -616,6 +617,27 @@ pub unsafe extern "C" fn c_add_base_layout(ctx: *mut q::JSContext,_: q::JSValue,
         return RawJsValue::val_bool(false)
     }
     storage.insert(entity,layout).unwrap();
+    RawJsValue::val_bool(true)
+}
+
+pub unsafe extern "C" fn c_add_stack_panel(ctx: *mut q::JSContext,_: q::JSValue,count:c_int,argv: *mut q::JSValue) -> q::JSValue {
+    let args = std::slice::from_raw_parts(argv, count as usize);
+    let world: &mut World = std::mem::transmute(q::JS_GetOpaque(args[0],WORLD_CLASS.as_ref().unwrap().class_id()));
+    let entity = get_entity(world, args[1], ctx).unwrap();
+    let orientation = RawJsValue(args[2]).to_value(ctx).unwrap().as_int().unwrap();
+    let spacing = RawJsValue(args[3]).to_value(ctx).unwrap().as_number().unwrap();
+    let mut stack = StackPanel::default();
+    if orientation == 0 {
+        stack.orientation = Orientation::Horizontal;
+    } else {
+        stack.orientation = Orientation::Vertical;
+    }
+    stack.spacing = spacing as f32;
+    let mut storage = world.write_storage::<StackPanel>();
+    if storage.contains(entity) {
+        return RawJsValue::val_bool(false)
+    }
+    storage.insert(entity,stack).unwrap();
     RawJsValue::val_bool(true)
 }
 
