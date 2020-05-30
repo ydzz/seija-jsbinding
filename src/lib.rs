@@ -11,7 +11,6 @@ use qjs_rs::{JSContext,AutoDropJSValue,RawJsValue,q,JSClass};
 pub fn binding_all(ctx:&mut JSContext) {
     unsafe {
         crate::core::WORLD_CLASS = Some(JSClass::new("World",ctx.c_rt()));
-        q::JS_SetContextOpaque(ctx.c_ctx(),std::mem::transmute(ctx as *mut JSContext));
     };
     let m = ctx.new_c_module("seija",Some(on_module_init));
    unsafe {
@@ -51,6 +50,7 @@ mod tests {
     fn test_run() {
         let mut runtime = JSRuntime::new().unwrap();
         let mut ctx = JSContext::new(&runtime).unwrap();
+        ctx.set_self_opaque();
         init_internal(&mut ctx,&mut runtime);
         binding_all(&mut ctx);
         boot_start(&mut ctx,"./tests/test.js").unwrap();
